@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Generate example Excel files demonstrating mcp-server-excel capabilities
+Generate example Excel files demonstrating mcp-excel capabilities
 """
 import pandas as pd
 from pathlib import Path

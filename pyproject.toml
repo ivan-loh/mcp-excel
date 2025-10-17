@@ -40,7 +40,7 @@ dev = [
 ]
 
 [project.scripts]
-mcp-server-excel = "src.server:main"
+mcp-excel = "src.server:main"
 
 [build-system]
 requires = ["setuptools>=61.0"]

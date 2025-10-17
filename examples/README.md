@@ -14,7 +14,7 @@
 
 ```bash
 python examples/create_examples.py
-mcp-server-excel --path examples --alias demo --overrides examples/examples_overrides.yaml --watch
+mcp-excel --path examples --alias demo --overrides examples/examples_overrides.yaml --watch
 ```
 
 ## File Details

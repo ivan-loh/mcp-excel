@@ -1,10 +1,7 @@
-# mcp-server-excel
+# mcp-excel
 
 MCP server exposing Excel files as SQL-queryable tables via DuckDB.
 
-[![Tests](https://img.shields.io/badge/tests-44%2F44%20passing-brightgreen)]()
-[![Coverage](https://img.shields.io/badge/coverage-77%25-yellowgreen)]()
-[![Python](https://img.shields.io/badge/python-3.11%2B-blue)]()
 
 ## Features
 
@@ -17,13 +14,13 @@ MCP server exposing Excel files as SQL-queryable tables via DuckDB.
 ## Installation
 
 ```bash
-pip install mcp-server-excel
+pip install mcp-excel
 ```
 
 ## Usage
 
 ```bash
-mcp-server-excel --path /data/excel --watch --overrides config.yaml
+mcp-excel --path /data/excel --watch --overrides config.yaml
 ```
 
 ## MCP Tools

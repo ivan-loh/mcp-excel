@@ -1,5 +1,5 @@
 # Override configuration for example Excel files
-# Use with: mcp-server-excel --path examples --overrides examples_overrides.yaml
+# Use with: mcp-excel --path examples --overrides examples_overrides.yaml
 
 # Example 1: clean_data.xlsx
 # No overrides needed - will load in RAW mode
@@ -92,7 +92,7 @@ inventory_report.xlsx:
 # Usage Examples:
 #
 # Load all examples:
-#   mcp-server-excel --path examples --alias demo --overrides examples_overrides.yaml
+#   mcp-excel --path examples --alias demo --overrides examples_overrides.yaml
 #
 # Then query:
 #   tool_query(sql="SELECT * FROM demo__clean_data__orders LIMIT 5")
