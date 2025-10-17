@@ -14,7 +14,7 @@ MCP server exposing Excel files as SQL-queryable tables via DuckDB.
 ## Installation
 
 ```bash
-pip install mcp-server-excel-sql
+pipx install mcp-server-excel-sql
 ```
 
 ## Usage
