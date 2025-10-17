@@ -1,5 +1,5 @@
 [project]
-name = "mcp-server-excel"
+name = "mcp-excel"
 version = "0.1.0"
 description = "MCP server that exposes Excel files as SQL-queryable tables via DuckDB"
 authors = [{name = "Ivan", email = "ivan@eriad.com"}]
