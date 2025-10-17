@@ -13,7 +13,7 @@ from .watcher import FileWatcher
 from . import logging as log
 
 
-mcp = FastMCP("mcp-excel")
+mcp = FastMCP("mcp-server-excel-sql")
 
 catalog: dict[str, TableMeta] = {}
 conn: Optional[duckdb.DuckDBPyConnection] = None

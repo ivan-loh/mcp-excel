@@ -1,4 +1,4 @@
-# Sample override configuration for mcp-excel
+# Sample override configuration for mcp-server-excel-sql
 # Use this to handle messy spreadsheets with non-standard layouts
 
 # Financial report with header rows and footer totals

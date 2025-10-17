@@ -1,5 +1,5 @@
 [project]
-name = "mcp-excel"
+name = "mcp-server-excel-sql"
 version = "0.1.0"
 description = "MCP server that exposes Excel files as SQL-queryable tables via DuckDB"
 authors = [{name = "Ivan", email = "ivan@eriad.com"}]
@@ -40,7 +40,7 @@ dev = [
 ]
 
 [project.scripts]
-mcp-excel = "src.server:main"
+mcp-excel = "mcp_excel.server:main"
 
 [build-system]
 requires = ["setuptools>=61.0"]
