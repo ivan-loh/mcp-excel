@@ -1,0 +1,92 @@
+# Sample override configuration for mcp-server-excel
+# Use this to handle messy spreadsheets with non-standard layouts
+
+# Financial report with header rows and footer totals
+finance/monthly_report.xlsx:
+  sheet_overrides:
+    Summary:
+      skip_rows: 2          # Skip title and subtitle rows
+      header_rows: 1        # Next row is the header
+      skip_footer: 3        # Remove total, notes, and signature rows
+      drop_regex: "^(Total|Subtotal|Notes):"  # Drop aggregate rows
+
+# Sales data with specific range
+sales/q1_2024.xlsx:
+  sheet_overrides:
+    Regional:
+      range: "A5:H200"      # Load only this range
+      header_rows: 1
+      column_renames:
+        "Reg.": region
+        "Amt": amount
+        "Qty": quantity
+
+# Multi-section report - load main table only
+reports/dashboard.xlsx:
+  sheet_overrides:
+    Main:
+      skip_rows: 5          # Skip dashboard header
+      header_rows: 2        # Multi-row header (will be flattened)
+      skip_footer: 10       # Skip charts and notes section
+
+# Raw data dump with messy column names
+data/export.xlsx:
+  sheet_overrides:
+    Data:
+      header_rows: 1
+      column_renames:
+        "Customer Name (Full)": customer_name
+        "Order Date & Time": order_datetime
+        "Total ($)": total_usd
+        "Status [Current]": status
+
+# Data with alternating summary rows
+inventory/stock_levels.xlsx:
+  sheet_overrides:
+    Current:
+      skip_rows: 1
+      header_rows: 1
+      drop_regex: "^(Category Total|Grand Total):"
+
+# Type casting for proper data types (Phase 2)
+metrics/kpis.xlsx:
+  sheet_overrides:
+    KPIs:
+      header_rows: 1
+      type_hints:
+        revenue: "DECIMAL(10,2)"
+        customer_count: "INT"
+        signup_date: "DATE"
+        is_active: "BOOL"
+
+# Unpivot wide-format data to long-format (Phase 3)
+regional_sales/monthly.xlsx:
+  sheet_overrides:
+    Sales:
+      header_rows: 1
+      unpivot:
+        id_vars: ["Region", "Product"]
+        value_vars: ["Jan", "Feb", "Mar", "Apr", "May", "Jun"]
+        var_name: "Month"
+        value_name: "Sales"
+
+# Combine all transformations
+warehouse/inventory.xlsx:
+  sheet_overrides:
+    Inventory:
+      skip_rows: 3
+      header_rows: 1
+      skip_footer: 2
+      drop_regex: "^(VOID|CANCELLED):"
+      column_renames:
+        "SKU#": "sku"
+        "Qty": "quantity"
+        "Unit Price": "unit_price"
+      type_hints:
+        quantity: "INT"
+        unit_price: "DECIMAL(10,2)"
+        last_updated: "DATE"
+
+# Example of no overrides - use RAW mode
+# simple_data/clean_export.xlsx:
+#   (No overrides needed - will use RAW mode)
