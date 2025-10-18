@@ -1,37 +1,82 @@
 # mcp-server-excel-sql
 
-MCP server exposing Excel files as SQL-queryable DuckDB views with thread-safe concurrent access.
+Let Claude query your Excel files using SQL - no SQL knowledge required. Ask questions in plain English, Claude writes and executes the queries automatically.
 
-## Features
+## What It Does
 
-- SQL queries on Excel via DuckDB views
-- RAW (all_varchar) or ASSISTED (sheet_overrides) modes
-- Multi-row headers, type hints, unpivot, column renames
-- Auto-refresh on file changes (--watch)
-- Thread-safe concurrent access (HTTP/SSE transports)
-- Isolated query timeouts (per-connection interrupt)
-- API key authentication for HTTP transports (optional)
+**How it works:**
+1. Point the server at your Excel files
+2. Ask Claude questions in plain English
+3. Claude writes SQL queries automatically
+4. Get instant answers from your data
+
+**Capabilities:**
+- Each Excel sheet becomes a queryable SQL table
+- Join data across multiple spreadsheets
+- Clean messy data with YAML transformation rules
+- Deploy for teams with concurrent access
+- Support for complex queries (aggregations, window functions, CTEs)
+
+## Should You Use This?
+
+**Great fit if you:**
+- Work with Excel files under 100MB
+- Want data insights without SQL knowledge
+- Need to join multiple spreadsheets
+- Use AI assistants (Claude writes the SQL for you)
+- Prototype before building ETL pipelines
+
+**Not the right tool if you:**
+- Have files over 100MB (use database import instead)
+- Need to modify Excel files (read-only)
+- Need formulas/macros/VBA (values only)
+- Building production data warehouse (prototyping only)
 
 ## Installation
+
+**Requirements:**
+- Python 3.11 or higher
+- pipx ([installation guide](https://pipx.pypa.io/stable/installation/))
 
 ```bash
 pipx install mcp-server-excel-sql
 ```
 
-## Usage
+## Try It Now
 
-### CLI
+Get running in 30 seconds with example data:
 
 ```bash
-# STDIO mode (single-threaded)
-mcp-excel --path /data/excel --watch --overrides config.yaml
+# Install
+pipx install mcp-server-excel-sql
 
-# HTTP mode (concurrent, ~10 users)
-mcp-excel --path /data/excel --transport streamable-http --port 8000
+# Download examples (or use your own Excel files)
+git clone https://github.com/your-repo/mcp-excel.git
+cd mcp-excel
 
-# HTTP mode with authentication
-export MCP_EXCEL_API_KEY=your-secret-key
-mcp-excel --path /data/excel --transport sse --port 8000 --require-auth
+# Generate example financial data
+python examples/create_finance_examples.py
+
+# Start server
+mcp-excel --path examples
+```
+
+Now the server is running with 10 financial Excel files loaded. Use Claude Desktop or query directly.
+
+## Quick Start
+
+### Command Line
+
+```bash
+# Single user (local development)
+mcp-excel --path /path/to/excel/files
+
+# With auto-refresh when files change
+mcp-excel --path /path/to/excel/files --watch
+
+# Multiple concurrent users (team deployment)
+# See DEVELOPMENT.md for authentication and security
+mcp-excel --path /path/to/excel/files --transport sse --port 8000
 ```
 
 ### Claude Desktop
@@ -49,7 +94,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
-With overrides:
+**With transformation rules:**
 ```json
 {
   "mcpServers": {
@@ -64,212 +109,235 @@ With overrides:
 }
 ```
 
-## MCP Tools
+Restart Claude Desktop after saving the configuration.
 
-**tool_load_dir** - Load Excel directory into views
-**tool_query** - Execute SELECT (read-only, timeout/limit enforced)
-**tool_list_tables** - List views with metadata
-**tool_get_schema** - DESCRIBE table
-**tool_refresh** - Rescan filesystem (incremental or full)
+## Common Use Cases
 
-## Table Naming
+**Financial Analysis**
+- Join budget vs actuals across quarters
+- AR aging analysis across regions
+- Revenue trending from monthly reports
 
-**Format**: `<alias>.<filepath>.<sheet>` (dot-separated, lowercase, sanitized)
+**Sales Reporting**
+- Combine sales data from multiple territories
+- Product performance across time periods
+- Customer segmentation from CRM exports
 
-**Sanitization**:
-- Spaces → `_`
-- Special chars → removed
-- Allowed: `[a-z0-9_$]`
+**Operations**
+- Inventory reconciliation from warehouse exports
+- Vendor comparison from procurement files
+- Project tracking from multiple PM spreadsheets
 
-**Alias**: Auto-generated from directory name
+**Data Exploration**
+- Quick SQL access to ad-hoc Excel exports
+- Testing data quality before building pipelines
+- Prototyping analytics without database setup
 
-**Examples**:
+## How It Works
+
+**You ask Claude in plain English:**
+- "What's the total revenue by region?"
+- "Show me customers with overdue invoices"
+- "Compare Q1 budget vs actuals by department"
+
+**Claude automatically:**
+1. Writes the SQL query using the available tools
+2. Executes the query against your Excel data
+3. Returns formatted results
+
+**No SQL knowledge required** - Claude handles query generation, table joins, and data formatting automatically.
+
+## Available Tools
+
+The server exposes 4 MCP tools for working with Excel data:
+
+**tool_list_tables**
+- Lists all available tables loaded from Excel files
+- Shows file path, sheet name, row count
+- Call this first to discover your data
+
+**tool_get_schema**
+- Shows column names and types for a specific table
+- Use after listing tables to understand structure
+
+**tool_query**
+- Execute SQL queries on your Excel data
+- Read-only (no modifications allowed)
+- Supports joins, aggregations, filtering
+
+**tool_refresh**
+- Reload data after Excel files have changed
+- Automatic with `--watch` flag
+
+## Examples
+
+The repository includes example Excel files with financial data for a Malaysian coffeehouse chain.
+
+**Generate examples:**
+```bash
+python examples/create_finance_examples.py
+mcp-excel --path examples --overrides examples/finance_overrides.yaml
 ```
-/data/sales/Q1-2024.xlsx → "sales.q12024.summary"
-/reports/P&L (Final).xlsx → "reports.plfinal.sheet1"
-```
 
-**IMPORTANT**: Dots require quoted identifiers in SQL:
+**Example queries:**
 ```sql
-SELECT * FROM "sales.q12024.summary"  -- correct
-SELECT * FROM sales.q12024.summary    -- fails (Catalog Error)
+-- Total debits in general ledger
+SELECT SUM(COALESCE(debit, 0)) as total_debits
+FROM "examples.general_ledger.entries";
+
+-- Revenue by region
+SELECT region, SUM(revenue) as total_revenue
+FROM "examples.revenue_by_segment.revenue"
+GROUP BY region
+ORDER BY total_revenue DESC;
+
+-- Budget variance analysis
+SELECT
+  department,
+  budget_amount,
+  actual_amount,
+  (actual_amount - budget_amount) as variance,
+  ROUND(((actual_amount - budget_amount) / budget_amount * 100), 2) as variance_pct
+FROM "examples.budget_vs_actuals.data"
+ORDER BY variance DESC;
 ```
+
+**Included files:**
+- General Ledger (MYR currency)
+- Financial Statements
+- Accounts Receivable Aging
+- Revenue Analysis by Segment
+- Budget vs Actuals
+- Invoice Register
+- Trial Balance
+- Cash Flow Forecast
+
+See `examples/README.md` for detailed query examples and usage patterns.
+
+## Understanding Table Names
+
+Excel files are converted to tables with this naming pattern:
+
+**Format:** `<alias>.<filename>.<sheet>`
+
+**Example:**
+- File: `/data/sales/Q1-2024.xlsx`
+- Sheet: `Summary`
+- Table name: `sales.q12024.summary`
+
+**Important:** Table names contain dots and must be quoted in SQL queries:
+
+```sql
+-- Correct
+SELECT * FROM "sales.q12024.summary"
+
+-- Wrong (will fail)
+SELECT * FROM sales.q12024.summary
+```
+
+**Name cleaning:**
+- Converted to lowercase
+- Spaces become underscores
+- Special characters removed
+- Only `a-z`, `0-9`, `_`, `$` allowed
 
 ## System Views
 
-`<alias>.__files` - File metadata (path, sheet_count, total_rows, mtime)
-`<alias>.__tables` - Table metadata (table_name, file, sheet, mode, est_rows)
+Special tables for browsing loaded data:
 
-Query: `SELECT * FROM "sales.__files"`
+**`<alias>.__files`** - File inventory
+```sql
+SELECT * FROM "sales.__files"
+```
+Shows: file paths, sheet count, total rows, modification time
 
-## Modes
+**`<alias>.__tables`** - Table catalog
+```sql
+SELECT * FROM "sales.__tables"
+```
+Shows: table names, source file, sheet name, row count
 
-**RAW**: `read_xlsx(..., all_varchar=true, header=false)`
-**ASSISTED**: Apply per-sheet overrides
+## Data Transformation
+
+Excel files often have messy formatting. Use transformation rules to clean data.
+
+**What you can fix:**
+- Skip header/footer rows
+- Combine multi-row headers
+- Filter out total/summary rows
+- Rename columns
+- Set data types (dates, decimals, etc.)
+- Pivot wide tables to long format
+
+**How it works:**
+1. Create YAML configuration file
+2. Specify transformations per file/sheet
+3. Load with `--overrides config.yaml`
+
+<details>
+<summary>Show transformation example</summary>
+
+Create `config.yaml`:
 
 ```yaml
 sales.xlsx:
   sheet_overrides:
     Summary:
-      skip_rows: 3
-      skip_footer: 2
-      header_rows: 2
-      drop_regex: "^Total:"
+      skip_rows: 3                    # Skip header rows
+      skip_footer: 2                  # Skip footer rows
+      header_rows: 2                  # Combine multi-row headers
+      drop_regex: "^Total:"           # Remove rows starting with "Total:"
       column_renames:
-        "col_0": "region"
+        "col_0": "region"             # Rename columns
       type_hints:
-        amount: "DECIMAL(10,2)"
+        amount: "DECIMAL(10,2)"       # Set column types
         date: "DATE"
-      unpivot:
+      unpivot:                        # Pivot wide tables to long format
         id_vars: ["Region"]
-        value_vars: ["Jan", "Feb"]
+        value_vars: ["Jan", "Feb", "Mar"]
         var_name: "Month"
         value_name: "Sales"
 ```
 
-## Concurrency & Thread Safety
-
-### Design
-
-**STDIO mode**: Single shared connection (single-threaded)
-**HTTP/SSE mode**: Isolated connections per request (concurrent)
-
-Supports ~10-20 concurrent users with <1ms overhead per request.
-
-### Thread Safety Features
-
-1. **Isolated Connections** - Each HTTP request gets its own DuckDB connection
-2. **Protected Catalog** - RLock guards all metadata dictionary access
-3. **Per-Connection Timeouts** - Query interrupts don't affect other users
-4. **Deadlock-Free** - Sequential lock acquisition (never nested)
-
-### Critical Fixes
-
-**Problem 1: Timeout Interference**
-- Before: One user's timeout killed all concurrent queries
-- After: Isolated connections ensure timeouts only affect their own query
-
-**Problem 2: Catalog Race**
-- Before: Concurrent refresh could corrupt table metadata
-- After: RLock protects all catalog reads/writes
-
-**Problem 3: Dictionary Mutation**
-- Before: Python dict operations not atomic (GIL can be released)
-- After: All dict mutations locked to prevent corruption
-
-### Performance
-
-- STDIO mode: 0% overhead (no changes to single-threaded path)
-- HTTP mode: ~0.6ms per request (connection + lock overhead)
-- Tested: 20 concurrent workers, 100+ operations
-
-### Testing
-
-**75/75 tests pass** including:
-- 6 concurrency tests (parallel queries, timeout isolation, refresh safety)
-- 4 stress tests (100+ concurrent operations, memory leak detection)
-- 1 authentication test (API key middleware validation)
-
-## Security
-
-- Read-only: BEGIN TRANSACTION READ ONLY (DuckDB-enforced, blocks all write operations)
-- Path-confined: Root path validation, no traversal
-- Timeout: threading.Timer → conn.interrupt() (isolated per connection)
-- Row limit: fetchmany(max_rows + 1)
-- Authentication: Optional API key for HTTP/SSE transports
-
-### Authentication
-
-API key authentication via Bearer token (HTTP/SSE transports only, STDIO bypassed).
-
-**Configuration**:
+Run with overrides:
 ```bash
-export MCP_EXCEL_API_KEY=your-secret-key
-mcp-excel --path /data/excel --transport sse --require-auth
+mcp-excel --path /data --overrides config.yaml
 ```
 
-**Client requests**:
-```bash
-curl -H "Authorization: Bearer your-secret-key" http://localhost:8000/sse
-```
+See `examples/finance_overrides.yaml` for complete real-world examples.
+</details>
 
-**Implementation**:
-- Starlette middleware intercepts all HTTP requests
-- Returns 401 for missing/invalid Authorization header
-- STDIO transport ignores --require-auth (local subprocess already OS-authenticated)
-- Single shared API key (environment variable)
+**Modes:**
+- **RAW** (default): Loads Excel as-is with all columns as text, no headers
+- **ASSISTED**: Applies transformation rules from YAML configuration
 
-## Examples
-
-Finance examples for **Kopitiam Kita Sdn Bhd**, a Malaysian coffeehouse chain:
+## CLI Options
 
 ```bash
-# Generate example files
-python examples/create_finance_examples.py
-
-# Load and query
-mcp-excel --path examples --alias finance --overrides examples/finance_overrides.yaml
-
-# Query examples
-SELECT SUM(COALESCE(debit, 0)) as total_debits
-FROM "finance.general_ledger.entries";
-
-SELECT region, SUM(revenue) as total_revenue
-FROM "finance.revenue_by_segment.revenue"
-GROUP BY region ORDER BY total_revenue DESC;
+mcp-excel [OPTIONS]
 ```
 
-**Includes**:
-- 10 Excel files with 3,100+ financial records (MYR currency)
-- General Ledger, Financial Statements, AR Aging, Revenue Analysis
-- Budget Variance, Invoices, Trial Balance, Cash Flow Forecast
-- Complete prompt chain sequences in `examples/README.md`
+**Options:**
+- `--path` - Directory containing Excel files (default: current directory)
+- `--overrides` - YAML configuration file for transformations
+- `--watch` - Auto-refresh when files change
+- `--transport` - Communication mode: `stdio`, `streamable-http`, `sse` (default: stdio)
+- `--host` - Host for HTTP/SSE (default: 127.0.0.1)
+- `--port` - Port for HTTP/SSE (default: 8000)
+- `--require-auth` - Enable API key authentication (uses MCP_EXCEL_API_KEY env var)
 
-See `examples/README.md` for detailed usage and SQL query patterns.
+## Additional Documentation
 
-## Development
+**Multi-user deployment, security, and development:**
+See [DEVELOPMENT.md](DEVELOPMENT.md) for:
+- Multi-user setup with authentication
+- Security model and enforcement
+- Architecture and design decisions
+- Performance characteristics
+- Testing and development workflow
 
-```bash
-pip install -e ".[dev]"
-pytest --cov=mcp_excel tests/
-python -m build
-```
-
-**Tests**: 75 passing (12 unit + 47 integration + 10 regression + 6 concurrency + 4 stress)
-**Coverage**: Comprehensive test coverage including race condition scenarios
-
-## Architecture Notes
-
-### Transport Modes
-
-**STDIO** (default):
-- Single shared in-memory DuckDB connection
-- Single-threaded (no concurrency concerns)
-- Ideal for: Claude Desktop, local CLI usage
-
-**HTTP/SSE** (--transport streamable-http):
-- Persistent DuckDB file (temp, auto-cleanup)
-- Isolated connection per request
-- RLock-protected shared state (catalog, load_configs)
-- Ideal for: Multiple concurrent users, web APIs
-
-### State Management
-
-**Global State** (thread-safe via locks):
-- `catalog` - Table metadata dict (protected by `_catalog_lock`)
-- `load_configs` - Directory configurations (protected by `_load_configs_lock`)
-- `registry` - Name collision tracking (internal lock)
-
-**Per-Request State** (isolated):
-- DuckDB connection (HTTP mode only)
-- Query timeout timer
-- Transaction state
-
-### Scale Limits
-
-- Current design: Optimized for ~10 concurrent users
-- Tested with: 20 concurrent workers
-- Upgrade path: If >20 users needed, consider connection pooling
+**Finance examples:**
+See [examples/README.md](examples/README.md) for detailed query examples and patterns.
 
 ## License
 

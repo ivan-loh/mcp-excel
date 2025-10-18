@@ -577,39 +577,23 @@ def stop_watching():
 
 
 @mcp.tool()
-def tool_load_dir(
-    path: str,
-    alias: str = None,
-    include_glob: list[str] = None,
-    exclude_glob: list[str] = None,
-    overrides: dict = None,
-) -> dict:
-    """
-    Load Excel files into DuckDB views.
-
-    Tables: <alias>.<filepath>.<sheet> (dot-separated, requires quotes in SQL)
-    Alias: Auto-generated from directory name (sanitized: lowercase, [a-z0-9_$])
-    System views: <alias>.__files, <alias>.__tables
-
-    Modes:
-    - RAW: all_varchar=true, header=false
-    - ASSISTED: apply sheet_overrides (skip_rows, header_rows, skip_footer, drop_regex,
-                column_renames, type_hints, unpivot)
-
-    Example: /data/sales/Q1.xlsx → "sales.q1.summary"
-    Query: SELECT * FROM "sales.q1.summary"
-    """
-    return load_dir(path, alias, include_glob, exclude_glob, overrides)
-
-
-@mcp.tool()
 def tool_query(sql: str, max_rows: int = 10000, timeout_ms: int = 60000) -> dict:
     """
-    Execute SQL query in read-only transaction.
+    Execute read-only SQL query against loaded Excel tables.
 
-    Table names contain dots, require double quotes: SELECT * FROM "alias.file.sheet"
-    Read-only enforced: BEGIN TRANSACTION READ ONLY (blocks DDL/DML at database level)
-    Limits: timeout_ms via conn.interrupt(), max_rows via fetchmany()
+    CRITICAL: Table names contain dots and MUST use double quotes.
+    Correct: SELECT * FROM "examples.sales.summary"
+    Wrong: SELECT * FROM examples.sales.summary
+
+    SQL dialect: DuckDB (supports CTEs, window functions, JSON)
+    Security: Read-only (INSERT/UPDATE/DELETE/CREATE/DROP blocked)
+
+    Parameters:
+    - sql: SQL query
+    - max_rows: Row limit (default: 10000)
+    - timeout_ms: Timeout in milliseconds (default: 60000)
+
+    Returns: {columns, rows, row_count, truncated, execution_ms}
     """
     return query(sql, max_rows, timeout_ms)
 
@@ -617,9 +601,15 @@ def tool_query(sql: str, max_rows: int = 10000, timeout_ms: int = 60000) -> dict
 @mcp.tool()
 def tool_list_tables(alias: str = None) -> dict:
     """
-    List loaded tables with metadata (file, sheet, mode, est_rows).
+    Discover available Excel tables. Call this first to see what data is loaded.
 
-    Filter: alias="sales" returns tables matching "sales.*"
+    Tables are named: <alias>.<filename>.<sheet> (lowercase, sanitized)
+    Use the exact table name from results in subsequent queries.
+
+    Optional parameter:
+    - alias: Filter to specific namespace (e.g., "examples" shows only "examples.*")
+
+    Returns: [{table, file, relpath, sheet, mode, est_rows}]
     """
     return list_tables(alias)
 
@@ -627,9 +617,14 @@ def tool_list_tables(alias: str = None) -> dict:
 @mcp.tool()
 def tool_get_schema(table: str) -> dict:
     """
-    Get table schema via DESCRIBE.
+    Get column names and types for a table.
 
-    Returns: columns[{name, type, nullable}]
+    Call this after tool_list_tables to inspect structure before querying.
+
+    Parameters:
+    - table: Exact table name from tool_list_tables
+
+    Returns: {columns: [{name, type, nullable}]}
     """
     return get_schema(table)
 
@@ -637,10 +632,15 @@ def tool_get_schema(table: str) -> dict:
 @mcp.tool()
 def tool_refresh(alias: str = None, full: bool = False) -> dict:
     """
-    Refresh tables from filesystem.
+    Reload tables from modified Excel files.
 
-    full=False: incremental (mtime check)
-    full=True: drop and reload
+    Parameters:
+    - alias: Refresh specific namespace or None for all
+    - full: false = incremental (mtime check, fast), true = drop/reload all (slow)
+
+    Use when Excel files change and auto-watch is disabled.
+
+    Returns: {changed, total} (incremental) or {files_count, sheets_count, dropped, added} (full)
     """
     return refresh(alias, full)
 

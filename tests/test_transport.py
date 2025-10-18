@@ -46,7 +46,6 @@ async def test_streamable_http_list_tools(http_server: str):
         tools = await client.list_tools()
         tool_names = [tool.name for tool in tools]
 
-        assert "tool_load_dir" in tool_names
         assert "tool_query" in tool_names
         assert "tool_list_tables" in tool_names
         assert "tool_get_schema" in tool_names
