@@ -1,6 +1,6 @@
 [project]
 name = "mcp-server-excel-sql"
-version = "0.3.0"
+version = "0.3.1"
 description = "MCP server that exposes Excel files as SQL-queryable tables via DuckDB"
 authors = [{name = "Ivan", email = "ivan@eriad.com"}]
 readme = "README.md"
