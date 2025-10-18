@@ -1,5 +1,10 @@
 # mcp-server-excel-sql
 
+[![PyPI version](https://badge.fury.io/py/mcp-server-excel-sql.svg)](https://pypi.org/project/mcp-server-excel-sql/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![MCP Server](https://img.shields.io/badge/MCP-Server-blue.svg)](https://modelcontextprotocol.io)
+
 Let Claude query your Excel files using SQL - no SQL knowledge required. Ask questions in plain English, Claude writes and executes the queries automatically.
 
 ## What It Does
@@ -16,6 +21,8 @@ Let Claude query your Excel files using SQL - no SQL knowledge required. Ask que
 - Clean messy data with YAML transformation rules
 - Deploy for teams with concurrent access
 - Support for complex queries (aggregations, window functions, CTEs)
+
+![Claude analyzing Excel budget data](examples/sample.png)
 
 ## Should You Use This?
 
@@ -51,7 +58,7 @@ Get running in 30 seconds with example data:
 pipx install mcp-server-excel-sql
 
 # Download examples (or use your own Excel files)
-git clone https://github.com/your-repo/mcp-excel.git
+git clone https://github.com/ivan-loh/mcp-excel.git
 cd mcp-excel
 
 # Generate example financial data
