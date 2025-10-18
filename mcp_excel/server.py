@@ -10,11 +10,13 @@ import click
 import duckdb
 import yaml
 from fastmcp import FastMCP
+from starlette.middleware import Middleware
 
 from .types import TableMeta, SheetOverride, LoadConfig
 from .naming import TableRegistry
 from .loader import ExcelLoader
 from .watcher import FileWatcher
+from .auth import APIKeyMiddleware, get_api_key_from_env
 from . import logging as log
 
 
@@ -650,7 +652,8 @@ def tool_refresh(alias: str = None, full: bool = False) -> dict:
 @click.option("--transport", default="stdio", type=click.Choice(["stdio", "streamable-http", "sse"]), help="MCP transport (default: stdio)")
 @click.option("--host", default="127.0.0.1", help="Host for HTTP transports (default: 127.0.0.1)")
 @click.option("--port", default=8000, type=int, help="Port for HTTP transports (default: 8000)")
-def main(path: str, overrides: Optional[str], watch: bool, transport: str, host: str, port: int):
+@click.option("--require-auth", is_flag=True, default=False, help="Require API key authentication (uses MCP_EXCEL_API_KEY env var)")
+def main(path: str, overrides: Optional[str], watch: bool, transport: str, host: str, port: int, require_auth: bool):
     use_http_mode = transport in ["streamable-http", "sse"]
     init_server(use_http_mode=use_http_mode)
 
@@ -668,9 +671,20 @@ def main(path: str, overrides: Optional[str], watch: bool, transport: str, host:
 
     try:
         if transport in ["streamable-http", "sse"]:
-            log.info("starting_http_server", transport=transport, host=host, port=port)
-            mcp.run(transport=transport, host=host, port=port)
+            middleware = []
+
+            if require_auth:
+                api_key = get_api_key_from_env()
+                if not api_key:
+                    raise ValueError("--require-auth enabled but MCP_EXCEL_API_KEY environment variable not set")
+                middleware.append(Middleware(APIKeyMiddleware, api_key=api_key))
+                log.info("auth_enabled", key_length=len(api_key))
+
+            log.info("starting_http_server", transport=transport, host=host, port=port, auth_enabled=require_auth)
+            mcp.run(transport=transport, host=host, port=port, middleware=middleware)
         else:
+            if require_auth:
+                log.warn("auth_ignored", reason="stdio_transport_does_not_support_auth")
             mcp.run(transport=transport)
     finally:
         if watch:

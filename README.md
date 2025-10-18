@@ -10,6 +10,7 @@ MCP server exposing Excel files as SQL-queryable DuckDB views with thread-safe c
 - Auto-refresh on file changes (--watch)
 - Thread-safe concurrent access (HTTP/SSE transports)
 - Isolated query timeouts (per-connection interrupt)
+- API key authentication for HTTP transports (optional)
 
 ## Installation
 
@@ -27,6 +28,10 @@ mcp-excel --path /data/excel --watch --overrides config.yaml
 
 # HTTP mode (concurrent, ~10 users)
 mcp-excel --path /data/excel --transport streamable-http --port 8000
+
+# HTTP mode with authentication
+export MCP_EXCEL_API_KEY=your-secret-key
+mcp-excel --path /data/excel --transport sse --port 8000 --require-auth
 ```
 
 ### Claude Desktop
@@ -160,9 +165,10 @@ Supports ~10-20 concurrent users with <1ms overhead per request.
 
 ### Testing
 
-**73/73 tests pass** including:
+**75/75 tests pass** including:
 - 6 concurrency tests (parallel queries, timeout isolation, refresh safety)
 - 4 stress tests (100+ concurrent operations, memory leak detection)
+- 1 authentication test (API key middleware validation)
 
 ## Security
 
@@ -170,6 +176,28 @@ Supports ~10-20 concurrent users with <1ms overhead per request.
 - Path-confined: Root path validation, no traversal
 - Timeout: threading.Timer → conn.interrupt() (isolated per connection)
 - Row limit: fetchmany(max_rows + 1)
+- Authentication: Optional API key for HTTP/SSE transports
+
+### Authentication
+
+API key authentication via Bearer token (HTTP/SSE transports only, STDIO bypassed).
+
+**Configuration**:
+```bash
+export MCP_EXCEL_API_KEY=your-secret-key
+mcp-excel --path /data/excel --transport sse --require-auth
+```
+
+**Client requests**:
+```bash
+curl -H "Authorization: Bearer your-secret-key" http://localhost:8000/sse
+```
+
+**Implementation**:
+- Starlette middleware intercepts all HTTP requests
+- Returns 401 for missing/invalid Authorization header
+- STDIO transport ignores --require-auth (local subprocess already OS-authenticated)
+- Single shared API key (environment variable)
 
 ## Examples
 
@@ -207,7 +235,7 @@ pytest --cov=mcp_excel tests/
 python -m build
 ```
 
-**Tests**: 73 passing (11 unit + 47 integration + 10 regression + 6 concurrency + 4 stress)
+**Tests**: 75 passing (12 unit + 47 integration + 10 regression + 6 concurrency + 4 stress)
 **Coverage**: Comprehensive test coverage including race condition scenarios
 
 ## Architecture Notes
