@@ -1,6 +1,8 @@
 import pytest
 from mcp_excel.naming import TableRegistry
 
+pytestmark = pytest.mark.unit
+
 
 def test_basic_sanitization():
     registry = TableRegistry()

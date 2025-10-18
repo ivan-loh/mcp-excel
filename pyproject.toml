@@ -1,6 +1,6 @@
 [project]
 name = "mcp-server-excel-sql"
-version = "0.1.1"
+version = "0.2.0"
 description = "MCP server that exposes Excel files as SQL-queryable tables via DuckDB"
 authors = [{name = "Ivan", email = "ivan@eriad.com"}]
 readme = "README.md"
@@ -53,3 +53,11 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
+markers = [
+    "unit: Unit tests for individual components",
+    "integration: Integration tests for end-to-end workflows",
+    "regression: Regression tests for fixed bugs",
+    "concurrency: Concurrency and thread safety tests",
+    "stress: Stress and performance tests",
+]
+addopts = "-v --strict-markers"

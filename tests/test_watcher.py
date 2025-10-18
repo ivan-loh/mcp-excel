@@ -1,26 +1,9 @@
 import pytest
 import time
-import tempfile
-from pathlib import Path
 import pandas as pd
 from mcp_excel.watcher import FileWatcher
 
-
-@pytest.fixture
-def temp_dir():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        yield Path(tmpdir)
-
-
-@pytest.fixture
-def sample_excel(temp_dir):
-    file_path = temp_dir / "test.xlsx"
-    df = pd.DataFrame({
-        "Name": ["Alice", "Bob"],
-        "Age": [25, 30]
-    })
-    df.to_excel(file_path, index=False)
-    return file_path
+pytestmark = pytest.mark.integration
 
 
 def test_watcher_creation(temp_dir):

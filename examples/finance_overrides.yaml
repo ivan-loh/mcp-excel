@@ -1,0 +1,112 @@
+general_ledger.xlsx:
+  sheet_overrides:
+    Entries:
+      header_rows: 1
+      type_hints:
+        debit: "DECIMAL"
+        credit: "DECIMAL"
+
+financial_statements.xlsx:
+  sheet_overrides:
+    "Income Statement":
+      header_rows: 1
+      type_hints:
+        q1_2024: "BIGINT"
+        q2_2024: "BIGINT"
+        q3_2024: "BIGINT"
+        q4_2024: "BIGINT"
+        fy_2024: "BIGINT"
+    "Balance Sheet":
+      header_rows: 1
+      type_hints:
+        amount: "BIGINT"
+    "Cash Flow":
+      header_rows: 1
+      type_hints:
+        amount: "BIGINT"
+
+accounts_receivable.xlsx:
+  sheet_overrides:
+    "AR Aging":
+      header_rows: 1
+      type_hints:
+        amount: "DECIMAL"
+        amount_paid: "DECIMAL"
+        days_outstanding: "INT"
+        balance: "DECIMAL"
+
+revenue_by_segment.xlsx:
+  sheet_overrides:
+    Revenue:
+      header_rows: 1
+      type_hints:
+        customer_count: "INT"
+        revenue: "DECIMAL"
+        cost: "DECIMAL"
+        gross_profit: "DECIMAL"
+        margin_pct: "DECIMAL"
+
+budget_vs_actuals.xlsx:
+  sheet_overrides:
+    Analysis:
+      header_rows: 1
+      type_hints:
+        budget: "DECIMAL"
+        actual: "DECIMAL"
+        variance: "DECIMAL"
+        variance_pct: "DECIMAL"
+
+invoice_register.xlsx:
+  sheet_overrides:
+    Invoices:
+      header_rows: 1
+      type_hints:
+        amount: "DECIMAL"
+        tax_amount: "DECIMAL"
+        total_amount: "DECIMAL"
+
+trial_balance.xlsx:
+  sheet_overrides:
+    "Trial Balance":
+      skip_rows: 5
+      header_rows: 1
+      skip_footer: 3
+      drop_regex: "^TOTALS"
+      type_hints:
+        debit: "DECIMAL"
+        credit: "DECIMAL"
+
+cash_flow_forecast.xlsx:
+  sheet_overrides:
+    "Monthly Forecast":
+      header_rows: 1
+      type_hints:
+        Jan_2025: "DECIMAL"
+        Feb_2025: "DECIMAL"
+        Mar_2025: "DECIMAL"
+        Apr_2025: "DECIMAL"
+        May_2025: "DECIMAL"
+        Jun_2025: "DECIMAL"
+        Jul_2025: "DECIMAL"
+        Aug_2025: "DECIMAL"
+        Sep_2025: "DECIMAL"
+        Oct_2025: "DECIMAL"
+        Nov_2025: "DECIMAL"
+        Dec_2025: "DECIMAL"
+
+expense_reports.xlsx:
+  sheet_overrides:
+    Reports:
+      header_rows: 1
+      type_hints:
+        amount: "DECIMAL"
+
+financial_ratios.xlsx:
+  sheet_overrides:
+    "Quarterly Metrics":
+      header_rows: 1
+      type_hints:
+        "Q1 2024": "DECIMAL"
+        "Q2 2024": "DECIMAL"
+        "Q3 2024": "DECIMAL"
+        "Q4 2024": "DECIMAL"

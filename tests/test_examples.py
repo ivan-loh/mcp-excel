@@ -2,18 +2,7 @@ import pytest
 from pathlib import Path
 import mcp_excel.server as server
 
-
-@pytest.fixture(autouse=True)
-def setup_server():
-    server.conn = None
-    server.registry = None
-    server.loader = None
-    server.catalog.clear()
-    server.load_configs.clear()
-    server.init_server()
-    yield
-    server.catalog.clear()
-    server.load_configs.clear()
+pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("setup_server")]
 
 
 def test_load_examples_directory():
@@ -23,46 +12,46 @@ def test_load_examples_directory():
 
     result = server.load_dir(path=str(examples_dir))
 
-    assert result["files_count"] >= 7
-    assert result["sheets_count"] >= 8
-    assert result["tables_count"] >= 8
+    assert result["files_count"] >= 10
+    assert result["sheets_count"] >= 12
+    assert result["tables_count"] >= 12
 
 
-def test_load_clean_data_raw_mode():
+def test_load_general_ledger_raw_mode():
     examples_dir = Path(__file__).parent.parent / "examples"
-    if not (examples_dir / "clean_data.xlsx").exists():
-        pytest.skip("clean_data.xlsx not found")
+    if not (examples_dir / "general_ledger.xlsx").exists():
+        pytest.skip("general_ledger.xlsx not found")
 
     alias = examples_dir.name
     result = server.load_dir(path=str(examples_dir))
 
     tables = server.list_tables(alias=alias)
-    clean_tables = [t for t in tables["tables"] if "clean_data" in t["table"]]
+    gl_tables = [t for t in tables["tables"] if "general_ledger" in t["table"]]
 
-    assert len(clean_tables) >= 1
-    assert any(t["mode"] == "RAW" for t in clean_tables)
+    assert len(gl_tables) >= 1
+    assert any(t["mode"] == "RAW" for t in gl_tables)
 
 
-def test_query_clean_data():
+def test_query_general_ledger():
     examples_dir = Path(__file__).parent.parent / "examples"
-    if not (examples_dir / "clean_data.xlsx").exists():
-        pytest.skip("clean_data.xlsx not found")
+    if not (examples_dir / "general_ledger.xlsx").exists():
+        pytest.skip("general_ledger.xlsx not found")
 
     alias = examples_dir.name
     server.load_dir(path=str(examples_dir))
 
-    result = server.query(f'SELECT COUNT(*) as count FROM "{alias}.clean_data.orders"')
+    result = server.query(f'SELECT COUNT(*) as count FROM "{alias}.general_ledger.entries"')
 
     assert result["row_count"] == 1
-    assert result["rows"][0][0] == 6
+    assert result["rows"][0][0] >= 1000
 
 
 def test_load_with_overrides():
     examples_dir = Path(__file__).parent.parent / "examples"
-    overrides_file = examples_dir / "examples_overrides.yaml"
+    overrides_file = examples_dir / "finance_overrides.yaml"
 
     if not overrides_file.exists():
-        pytest.skip("examples_overrides.yaml not found")
+        pytest.skip("finance_overrides.yaml not found")
 
     import yaml
     with open(overrides_file) as f:
@@ -70,7 +59,28 @@ def test_load_with_overrides():
 
     result = server.load_dir(path=str(examples_dir), overrides=overrides)
 
-    assert result["files_count"] >= 6
+    assert result["files_count"] >= 10
+
+
+def test_query_financial_statements():
+    examples_dir = Path(__file__).parent.parent / "examples"
+    if not (examples_dir / "financial_statements.xlsx").exists():
+        pytest.skip("financial_statements.xlsx not found")
+
+    alias = examples_dir.name
+    server.load_dir(path=str(examples_dir))
+
+    income_result = server.query(f'SELECT COUNT(*) as count FROM "{alias}.financial_statements.income_statement"')
+    assert income_result["row_count"] == 1
+    assert income_result["rows"][0][0] >= 1
+
+    balance_result = server.query(f'SELECT COUNT(*) as count FROM "{alias}.financial_statements.balance_sheet"')
+    assert balance_result["row_count"] == 1
+    assert balance_result["rows"][0][0] >= 19
+
+    cashflow_result = server.query(f'SELECT COUNT(*) as count FROM "{alias}.financial_statements.cash_flow"')
+    assert cashflow_result["row_count"] == 1
+    assert cashflow_result["rows"][0][0] >= 16
 
 
 def test_system_views_with_examples():
@@ -83,8 +93,8 @@ def test_system_views_with_examples():
 
     files_result = server.query(f'SELECT COUNT(*) as count FROM "{alias}.__files"')
     assert files_result["row_count"] == 1
-    assert files_result["rows"][0][0] >= 7
+    assert files_result["rows"][0][0] >= 10
 
     tables_result = server.query(f'SELECT COUNT(*) as count FROM "{alias}.__tables"')
     assert tables_result["row_count"] == 1
-    assert tables_result["rows"][0][0] >= 8
+    assert tables_result["rows"][0][0] >= 12

@@ -1,31 +1,24 @@
 import os
 import time
-import tempfile
 import pytest
 from pathlib import Path
-import pandas as pd
 import openpyxl
 
 import mcp_excel.server as server
 from mcp_excel.server import (
-    init_server,
     load_dir,
     refresh,
     catalog,
     load_configs,
 )
 
-
-@pytest.fixture
-def temp_excel_dir():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        yield Path(tmpdir)
+pytestmark = pytest.mark.regression
 
 
 @pytest.fixture(autouse=True)
 def reset_server_state():
     catalog.clear()
-    load_configs.clear()
+    server.load_configs.clear()
     if server.conn:
         try:
             for table_name in list(catalog.keys()):
@@ -35,10 +28,10 @@ def reset_server_state():
                     pass
         except:
             pass
-    init_server()
+    server.init_server()
     yield
     catalog.clear()
-    load_configs.clear()
+    server.load_configs.clear()
 
 
 class TestIssue3RefreshAliasExtraction:

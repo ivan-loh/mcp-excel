@@ -1,7 +1,11 @@
+import re
 import time
 import threading
+import tempfile
+import contextlib
 from pathlib import Path
 from typing import Optional
+
 import click
 import duckdb
 import yaml
@@ -23,13 +27,53 @@ loader: Optional[ExcelLoader] = None
 load_configs: dict[str, LoadConfig] = {}
 watcher: Optional[FileWatcher] = None
 
+_catalog_lock = threading.RLock()
+_load_configs_lock = threading.RLock()
+_registry_lock = threading.RLock()
+_db_path: Optional[str] = None
+_use_http_mode = False
 
-def init_server():
-    global conn, registry, loader
-    if not conn:
-        conn = duckdb.connect(":memory:")
-        registry = TableRegistry()
-        loader = ExcelLoader(conn, registry)
+
+def init_server(use_http_mode: bool = False):
+    global conn, registry, loader, _db_path, _use_http_mode
+
+    _use_http_mode = use_http_mode
+    registry = TableRegistry()
+
+    if use_http_mode:
+        import os
+        import time
+        temp_dir = tempfile.gettempdir()
+        _db_path = os.path.join(temp_dir, f"mcp_excel_{os.getpid()}_{int(time.time() * 1000000)}.duckdb")
+    else:
+        _db_path = ":memory:"
+        if not conn:
+            conn = duckdb.connect(":memory:")
+
+    if use_http_mode:
+        loader = None
+    else:
+        loader = ExcelLoader(conn, registry) if conn else None
+
+
+@contextlib.contextmanager
+def get_connection():
+    global conn
+    if _use_http_mode:
+        local_conn = duckdb.connect(_db_path)
+        try:
+            local_conn.execute("INSTALL excel")
+            local_conn.execute("LOAD excel")
+        except:
+            pass
+        try:
+            yield local_conn
+        finally:
+            local_conn.close()
+    else:
+        if conn is None:
+            conn = duckdb.connect(_db_path)
+        yield conn
 
 
 def validate_root_path(user_path: str) -> Path:
@@ -44,13 +88,41 @@ def validate_root_path(user_path: str) -> Path:
     return path
 
 
-def _create_system_views(alias: str):
-    import pandas as pd
+def _generate_alias_from_path(root: Path) -> str:
+    alias = root.name or "excel"
+    alias = alias.lower()
+    alias = re.sub(r"[^a-z0-9_]+", "_", alias)
+    alias = re.sub(r"_+", "_", alias)
+    alias = alias.strip("_")
 
+    return alias if alias else "excel"
+
+
+def _parse_sheet_override(override_dict: dict) -> SheetOverride:
+    return SheetOverride(
+        skip_rows=override_dict.get("skip_rows", 0),
+        header_rows=override_dict.get("header_rows", 1),
+        skip_footer=override_dict.get("skip_footer", 0),
+        range=override_dict.get("range", ""),
+        drop_regex=override_dict.get("drop_regex", ""),
+        column_renames=override_dict.get("column_renames", {}),
+        type_hints=override_dict.get("type_hints", {}),
+        unpivot=override_dict.get("unpivot", {}),
+    )
+
+
+def _should_exclude_file(file_path: Path, exclude_patterns: list[str]) -> bool:
+    for pattern in exclude_patterns:
+        if file_path.match(pattern):
+            return True
+    return False
+
+
+def _prepare_system_view_data(catalog_dict: dict, alias: str) -> tuple[dict, list]:
     files_data = {}
     tables_data = []
 
-    for table_name, meta in catalog.items():
+    for table_name, meta in catalog_dict.items():
         if not table_name.startswith(f"{alias}."):
             continue
 
@@ -76,33 +148,46 @@ def _create_system_views(alias: str):
             "mtime": meta.mtime,
         })
 
+    return files_data, tables_data
+
+
+def _register_dataframe_view(conn, temp_table_name: str, view_name: str, dataframe):
+    import pandas as pd
+
+    try:
+        conn.unregister(temp_table_name)
+    except:
+        pass
+
+    conn.register(temp_table_name, dataframe)
+    conn.execute(f'CREATE OR REPLACE VIEW "{view_name}" AS SELECT * FROM {temp_table_name}')
+
+
+def _create_system_views(alias: str):
+    import pandas as pd
+
+    with _catalog_lock:
+        files_data, tables_data = _prepare_system_view_data(catalog, alias)
+
     files_view_name = f"{alias}.__files"
     tables_view_name = f"{alias}.__tables"
     temp_files_table = f"temp_files_{alias}"
     temp_tables_table = f"temp_tables_{alias}"
 
-    try:
-        if files_data:
-            files_df = pd.DataFrame(list(files_data.values()))
-            try:
-                conn.unregister(temp_files_table)
-            except:
-                pass
-            conn.register(temp_files_table, files_df)
-            conn.execute(f'CREATE OR REPLACE VIEW "{files_view_name}" AS SELECT * FROM {temp_files_table}')
+    with get_connection() as conn:
+        try:
+            if files_data:
+                files_df = pd.DataFrame(list(files_data.values()))
+                _register_dataframe_view(conn, temp_files_table, files_view_name, files_df)
 
-        if tables_data:
-            tables_df = pd.DataFrame(tables_data)
-            try:
-                conn.unregister(temp_tables_table)
-            except:
-                pass
-            conn.register(temp_tables_table, tables_df)
-            conn.execute(f'CREATE OR REPLACE VIEW "{tables_view_name}" AS SELECT * FROM {temp_tables_table}')
+            if tables_data:
+                tables_df = pd.DataFrame(tables_data)
+                _register_dataframe_view(conn, temp_tables_table, tables_view_name, tables_df)
 
-        log.info("system_views_created", alias=alias, files_view=files_view_name, tables_view=tables_view_name)
-    except Exception as e:
-        log.warn("system_views_failed", alias=alias, error=str(e))
+            log.info("system_views_created", alias=alias,
+                    files_view=files_view_name, tables_view=tables_view_name)
+        except Exception as e:
+            log.warn("system_views_failed", alias=alias, error=str(e))
 
 
 def load_dir(
@@ -112,8 +197,6 @@ def load_dir(
     exclude_glob: list[str] = None,
     overrides: dict = None,
 ) -> dict:
-    init_server()
-
     include_glob = include_glob or ["**/*.xlsx"]
     exclude_glob = exclude_glob or []
     overrides = overrides or {}
@@ -121,14 +204,7 @@ def load_dir(
     root = validate_root_path(path)
 
     if alias is None:
-        import re
-        alias = root.name or "excel"
-        alias = alias.lower()
-        alias = re.sub(r"[^a-z0-9_]+", "_", alias)
-        alias = re.sub(r"_+", "_", alias)
-        alias = alias.strip("_")
-        if not alias:
-            alias = "excel"
+        alias = _generate_alias_from_path(root)
 
     log.info("load_start", path=str(root), alias=alias, patterns=include_glob)
 
@@ -137,73 +213,72 @@ def load_dir(
     total_rows = 0
     failed_files = []
 
-    config = LoadConfig(
+    load_config = LoadConfig(
         root=root,
         alias=alias,
         include_glob=include_glob,
         exclude_glob=exclude_glob,
         overrides=overrides,
     )
-    load_configs[alias] = config
+    with _load_configs_lock:
+        load_configs[alias] = load_config
 
-    for pattern in include_glob:
-        for file_path in root.glob(pattern):
-            if not file_path.is_file():
-                continue
+    with get_connection() as conn:
+        loader = ExcelLoader(conn, registry)
 
-            relpath = str(file_path.relative_to(root))
+        for pattern in include_glob:
+            for file_path in root.glob(pattern):
+                if not file_path.is_file():
+                    continue
 
-            should_exclude = False
-            for exclude_pattern in exclude_glob:
-                if file_path.match(exclude_pattern):
-                    should_exclude = True
-                    break
-            if should_exclude:
-                continue
+                relative_path = str(file_path.relative_to(root))
 
-            try:
-                sheet_names = loader.get_sheet_names(file_path)
+                if _should_exclude_file(file_path, exclude_glob):
+                    continue
 
-                file_overrides = overrides.get(relpath, {})
-                sheet_overrides = file_overrides.get("sheet_overrides", {})
+                try:
+                    sheet_names = loader.get_sheet_names(file_path)
+                    file_overrides = overrides.get(relative_path, {})
+                    sheet_overrides_dict = file_overrides.get("sheet_overrides", {})
 
-                for sheet_name in sheet_names:
-                    override_dict = sheet_overrides.get(sheet_name)
-                    override = None
-                    if override_dict:
-                        override = SheetOverride(
-                            skip_rows=override_dict.get("skip_rows", 0),
-                            header_rows=override_dict.get("header_rows", 1),
-                            skip_footer=override_dict.get("skip_footer", 0),
-                            range=override_dict.get("range", ""),
-                            drop_regex=override_dict.get("drop_regex", ""),
-                            column_renames=override_dict.get("column_renames", {}),
-                            type_hints=override_dict.get("type_hints", {}),
-                            unpivot=override_dict.get("unpivot", {}),
-                        )
+                    for sheet_name in sheet_names:
+                        sheet_override_dict = sheet_overrides_dict.get(sheet_name)
+                        sheet_override = None
 
-                    meta = loader.load_sheet(file_path, relpath, sheet_name, alias, override)
-                    catalog[meta.table_name] = meta
-                    sheets_loaded += 1
-                    total_rows += meta.est_rows
+                        if sheet_override_dict:
+                            sheet_override = _parse_sheet_override(sheet_override_dict)
 
-                    log.info("table_created", table=meta.table_name, file=relpath,
-                            sheet=sheet_name, rows=meta.est_rows, mode=meta.mode)
+                        table_meta = loader.load_sheet(file_path, relative_path,
+                                                       sheet_name, alias, sheet_override)
 
-                files_loaded += 1
-            except Exception as e:
-                error_msg = str(e)
-                log.warn("load_failed", file=relpath, error=error_msg)
-                failed_files.append({"file": relpath, "error": error_msg})
+                        with _catalog_lock:
+                            catalog[table_meta.table_name] = table_meta
+
+                        sheets_loaded += 1
+                        total_rows += table_meta.est_rows
+
+                        log.info("table_created", table=table_meta.table_name,
+                                file=relative_path, sheet=sheet_name,
+                                rows=table_meta.est_rows, mode=table_meta.mode)
+
+                    files_loaded += 1
+
+                except Exception as e:
+                    error_msg = str(e)
+                    log.warn("load_failed", file=relative_path, error=error_msg)
+                    failed_files.append({"file": relative_path, "error": error_msg})
 
     _create_system_views(alias)
+
+    with _catalog_lock:
+        tables_count = len([t for t in catalog if t.startswith(f"{alias}.")])
 
     result = {
         "alias": alias,
         "root": str(root),
         "files_count": files_loaded,
         "sheets_count": sheets_loaded,
-        "tables_count": len([t for t in catalog if t.startswith(f"{alias}.")]),
+        "tables_count": tables_count,
         "rows_estimate": total_rows,
         "cache_mode": "none",
         "materialized": False,
@@ -212,8 +287,8 @@ def load_dir(
     if failed_files:
         result["failed"] = failed_files
 
-    log.info("load_complete", alias=alias, files=files_loaded, sheets=sheets_loaded,
-            rows=total_rows, failed=len(failed_files))
+    log.info("load_complete", alias=alias, files=files_loaded,
+            sheets=sheets_loaded, rows=total_rows, failed=len(failed_files))
 
     return result
 
@@ -223,184 +298,257 @@ def query(
     max_rows: int = 10000,
     timeout_ms: int = 60000,
 ) -> dict:
-    init_server()
-
-    start = time.time()
+    start_time = time.time()
     interrupted = [False]
     transaction_started = [False]
 
-    def timeout_handler():
-        interrupted[0] = True
-        try:
-            conn.interrupt()
-        except Exception as e:
-            log.warn("interrupt_failed", error=str(e))
-
-    timer = threading.Timer(timeout_ms / 1000.0, timeout_handler)
-    timer.start()
-
-    result = None
-    columns = None
-
-    try:
-        conn.execute("BEGIN TRANSACTION READ ONLY")
-        transaction_started[0] = True
-
-        cursor = conn.execute(sql)
-        result = cursor.fetchmany(max_rows + 1)
-        columns = [{"name": desc[0], "type": str(desc[1])} for desc in cursor.description]
-
-        conn.execute("COMMIT")
-        transaction_started[0] = False
-
-    except Exception as e:
-        if interrupted[0]:
-            execution_ms = int((time.time() - start) * 1000)
-            log.warn("query_timeout", execution_ms=execution_ms, timeout_ms=timeout_ms)
-            raise TimeoutError(f"Query exceeded {timeout_ms}ms timeout")
-        log.error("query_failed", error=str(e), sql=sql[:100])
-        raise RuntimeError(f"Query failed: {e}")
-    finally:
-        timer.cancel()
-
-        if transaction_started[0]:
+    with get_connection() as conn:
+        def timeout_handler():
+            interrupted[0] = True
             try:
-                conn.execute("ROLLBACK")
-                log.info("transaction_rolled_back", reason="cleanup")
-            except Exception as rollback_error:
-                log.warn("rollback_failed", error=str(rollback_error))
+                conn.interrupt()
+            except Exception as e:
+                log.warn("interrupt_failed", error=str(e))
 
-    execution_ms = int((time.time() - start) * 1000)
-    truncated = len(result) > max_rows
-    rows = result[:max_rows]
+        timeout_seconds = timeout_ms / 1000.0
+        timer = threading.Timer(timeout_seconds, timeout_handler)
+        timer.start()
 
-    log.info("query_executed", rows=len(rows), execution_ms=execution_ms, truncated=truncated)
+        query_result = None
+        columns = None
+
+        try:
+            conn.execute("BEGIN TRANSACTION READ ONLY")
+            transaction_started[0] = True
+
+            cursor = conn.execute(sql)
+            query_result = cursor.fetchmany(max_rows + 1)
+            columns = [
+                {"name": desc[0], "type": str(desc[1])}
+                for desc in cursor.description
+            ]
+
+            conn.execute("COMMIT")
+            transaction_started[0] = False
+
+        except Exception as e:
+            if interrupted[0]:
+                execution_ms = int((time.time() - start_time) * 1000)
+                log.warn("query_timeout", execution_ms=execution_ms, timeout_ms=timeout_ms)
+                raise TimeoutError(f"Query exceeded {timeout_ms}ms timeout")
+
+            log.error("query_failed", error=str(e), sql=sql[:100])
+            raise RuntimeError(f"Query failed: {e}")
+
+        finally:
+            timer.cancel()
+
+            if transaction_started[0]:
+                try:
+                    conn.execute("ROLLBACK")
+                    log.info("transaction_rolled_back", reason="cleanup")
+                except Exception as rollback_error:
+                    log.warn("rollback_failed", error=str(rollback_error))
+
+    execution_ms = int((time.time() - start_time) * 1000)
+    is_truncated = len(query_result) > max_rows
+    rows = query_result[:max_rows]
+
+    log.info("query_executed", rows=len(rows),
+            execution_ms=execution_ms, truncated=is_truncated)
 
     return {
         "columns": columns,
         "rows": rows,
         "row_count": len(rows),
-        "truncated": truncated,
+        "truncated": is_truncated,
         "execution_ms": execution_ms,
     }
 
 
 def list_tables(alias: str = None) -> dict:
-    init_server()
-
     tables = []
-    for table_name, meta in catalog.items():
-        if alias and not table_name.startswith(f"{alias}."):
-            continue
-        tables.append({
-            "table": table_name,
-            "file": meta.file,
-            "relpath": meta.relpath,
-            "sheet": meta.sheet,
-            "mode": meta.mode,
-            "est_rows": meta.est_rows,
-        })
+
+    with _catalog_lock:
+        for table_name, table_meta in catalog.items():
+            if alias and not table_name.startswith(f"{alias}."):
+                continue
+
+            tables.append({
+                "table": table_name,
+                "file": table_meta.file,
+                "relpath": table_meta.relpath,
+                "sheet": table_meta.sheet,
+                "mode": table_meta.mode,
+                "est_rows": table_meta.est_rows,
+            })
 
     return {"tables": tables}
 
 
-def get_schema(table: str) -> dict:
-    init_server()
+def get_schema(table_name: str) -> dict:
+    with _catalog_lock:
+        if table_name not in catalog:
+            raise ValueError(f"Table {table_name} not found")
 
-    if table not in catalog:
-        raise ValueError(f"Table {table} not found")
-
-    result = conn.execute(f'DESCRIBE "{table}"').fetchall()
-    columns = [
-        {"name": row[0], "type": row[1], "nullable": row[2] == "YES"}
-        for row in result
-    ]
+    with get_connection() as conn:
+        try:
+            schema_result = conn.execute(f'DESCRIBE "{table_name}"').fetchall()
+            columns = [
+                {"name": row[0], "type": row[1], "nullable": row[2] == "YES"}
+                for row in schema_result
+            ]
+        except Exception as e:
+            with _catalog_lock:
+                if table_name not in catalog:
+                    raise ValueError(f"Table {table_name} not found (removed during request)")
+            raise RuntimeError(f"Failed to get schema: {e}")
 
     return {"columns": columns}
 
 
-def refresh(alias: str = None, full: bool = False) -> dict:
-    init_server()
+def _refresh_full(alias: str) -> dict:
+    with _catalog_lock:
+        tables_to_drop = [
+            table_name for table_name in catalog
+            if alias is None or table_name.startswith(f"{alias}.")
+        ]
 
-    if full:
-        changed = 0
-        dropped = 0
-        added = 0
+    dropped_count = 0
 
-        tables_to_drop = []
-        for table_name in catalog:
-            if alias is None or table_name.startswith(f"{alias}."):
-                tables_to_drop.append(table_name)
-
+    with get_connection() as conn:
         for table_name in tables_to_drop:
             try:
                 conn.execute(f'DROP VIEW IF EXISTS "{table_name}"')
-                del catalog[table_name]
-                dropped += 1
+
+                with _catalog_lock:
+                    del catalog[table_name]
+
+                dropped_count += 1
             except Exception:
                 pass
 
-        if alias and alias in load_configs:
-            config = load_configs[alias]
-            result = load_dir(
-                path=str(config.root),
-                alias=alias,
-                include_glob=config.include_glob,
-                exclude_glob=config.exclude_glob,
-                overrides=config.overrides,
-            )
-            added = result["tables_count"]
+    added_count = 0
+    files_count = 0
+    sheets_count = 0
 
-        _create_system_views(alias)
+    with _load_configs_lock:
+        load_config = load_configs.get(alias) if alias else None
 
-        return {"files_count": result.get("files_count", 0), "sheets_count": result.get("sheets_count", 0), "changed": changed, "dropped": dropped, "added": added}
-    else:
-        changed = 0
-        for table_name, meta in list(catalog.items()):
+    if load_config:
+        result = load_dir(
+            path=str(load_config.root),
+            alias=alias,
+            include_glob=load_config.include_glob,
+            exclude_glob=load_config.exclude_glob,
+            overrides=load_config.overrides,
+        )
+        added_count = result["tables_count"]
+        files_count = result.get("files_count", 0)
+        sheets_count = result.get("sheets_count", 0)
+
+    _create_system_views(alias)
+
+    return {
+        "files_count": files_count,
+        "sheets_count": sheets_count,
+        "changed": 0,
+        "dropped": dropped_count,
+        "added": added_count,
+    }
+
+
+def _refresh_incremental(alias: str) -> dict:
+    changed_count = 0
+
+    with _catalog_lock:
+        catalog_snapshot = list(catalog.items())
+
+    with get_connection() as conn:
+        loader = ExcelLoader(conn, registry)
+
+        for table_name, table_meta in catalog_snapshot:
+            if alias and not table_name.startswith(f"{alias}."):
+                continue
+
             try:
-                file_path = Path(meta.file)
+                file_path = Path(table_meta.file)
 
                 if not file_path.exists():
-                    log.warn("refresh_file_missing", table=table_name, file=meta.file)
+                    log.warn("refresh_file_missing", table=table_name, file=table_meta.file)
                     continue
 
                 current_mtime = file_path.stat().st_mtime
-                if current_mtime > meta.mtime:
-                    config = load_configs.get(meta.alias)
-                    if not config:
-                        log.warn("refresh_no_config", table=table_name, alias=meta.alias)
-                        continue
 
-                    try:
-                        relpath = str(file_path.relative_to(config.root))
-                    except ValueError:
-                        log.warn("refresh_path_outside_root", table=table_name,
-                                file=str(file_path), root=str(config.root))
-                        continue
+                if current_mtime <= table_meta.mtime:
+                    continue
 
-                    override_dict = config.overrides.get(relpath, {}).get("sheet_overrides", {}).get(meta.sheet)
-                    override = None
-                    if override_dict:
-                        override = SheetOverride(**override_dict)
+                with _load_configs_lock:
+                    load_config = load_configs.get(table_meta.alias)
 
-                    conn.execute(f'DROP VIEW IF EXISTS "{table_name}"')
-                    new_meta = loader.load_sheet(file_path, relpath, meta.sheet, config.alias, override)
+                if not load_config:
+                    log.warn("refresh_no_config", table=table_name, alias=table_meta.alias)
+                    continue
+
+                try:
+                    relative_path = str(file_path.relative_to(load_config.root))
+                except ValueError:
+                    log.warn("refresh_path_outside_root", table=table_name,
+                            file=str(file_path), root=str(load_config.root))
+                    continue
+
+                sheet_override_dict = (
+                    load_config.overrides
+                    .get(relative_path, {})
+                    .get("sheet_overrides", {})
+                    .get(table_meta.sheet)
+                )
+
+                sheet_override = None
+                if sheet_override_dict:
+                    sheet_override = SheetOverride(**sheet_override_dict)
+
+                conn.execute(f'DROP VIEW IF EXISTS "{table_name}"')
+                new_meta = loader.load_sheet(file_path, relative_path,
+                                            table_meta.sheet, load_config.alias,
+                                            sheet_override)
+
+                with _catalog_lock:
                     catalog[table_name] = new_meta
-                    changed += 1
+
+                changed_count += 1
+
             except Exception as e:
                 log.warn("refresh_failed", table=table_name, error=str(e))
                 continue
 
-        return {"changed": changed, "total": len(catalog)}
+    with _catalog_lock:
+        total = len(catalog)
+
+    return {
+        "changed": changed_count,
+        "total": total,
+    }
+
+
+def refresh(alias: str = None, full: bool = False) -> dict:
+    if full:
+        return _refresh_full(alias)
+    else:
+        return _refresh_incremental(alias)
 
 
 def _on_file_change():
     log.info("file_change_detected", message="Auto-refreshing tables")
 
     try:
-        for alias in load_configs.keys():
+        with _load_configs_lock:
+            aliases = list(load_configs.keys())
+
+        for alias in aliases:
             result = refresh(alias=alias, full=False)
-            log.info("auto_refresh_complete", alias=alias, changed=result.get("changed", 0))
+            log.info("auto_refresh_complete", alias=alias,
+                    changed=result.get("changed", 0))
     except Exception as e:
         log.error("auto_refresh_failed", error=str(e))
 
@@ -503,7 +651,8 @@ def tool_refresh(alias: str = None, full: bool = False) -> dict:
 @click.option("--host", default="127.0.0.1", help="Host for HTTP transports (default: 127.0.0.1)")
 @click.option("--port", default=8000, type=int, help="Port for HTTP transports (default: 8000)")
 def main(path: str, overrides: Optional[str], watch: bool, transport: str, host: str, port: int):
-    init_server()
+    use_http_mode = transport in ["streamable-http", "sse"]
+    init_server(use_http_mode=use_http_mode)
 
     overrides_dict = {}
     if overrides:
@@ -526,6 +675,13 @@ def main(path: str, overrides: Optional[str], watch: bool, transport: str, host:
     finally:
         if watch:
             stop_watching()
+
+        if use_http_mode and _db_path and _db_path != ":memory:":
+            try:
+                Path(_db_path).unlink(missing_ok=True)
+                log.info("temp_db_cleaned", path=_db_path)
+            except Exception as e:
+                log.warn("temp_db_cleanup_failed", path=_db_path, error=str(e))
 
 
 if __name__ == "__main__":

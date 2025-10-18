@@ -1,4 +1,5 @@
 import re
+import threading
 from collections import defaultdict
 
 
@@ -6,12 +7,14 @@ class TableRegistry:
     def __init__(self):
         self._names: dict[str, int] = {}
         self._collision_counts: defaultdict[str, int] = defaultdict(int)
+        self._lock = threading.RLock()
 
     def register(self, alias: str, relpath: str, sheet: str, region_id: int = 0) -> str:
-        sanitized = self._build_and_sanitize(alias, relpath, sheet, region_id)
-        final_name = self._handle_collision(sanitized)
-        self._names[final_name] = 1
-        return final_name
+        with self._lock:
+            sanitized = self._build_and_sanitize(alias, relpath, sheet, region_id)
+            final_name = self._handle_collision(sanitized)
+            self._names[final_name] = 1
+            return final_name
 
     def _build_and_sanitize(self, alias: str, relpath: str, sheet: str, region_id: int) -> str:
         relpath_no_ext = relpath.rsplit(".", 1)[0] if "." in relpath else relpath
@@ -61,5 +64,6 @@ class TableRegistry:
         return f"{name}_{collision_num}"
 
     def clear(self):
-        self._names.clear()
-        self._collision_counts.clear()
+        with self._lock:
+            self._names.clear()
+            self._collision_counts.clear()

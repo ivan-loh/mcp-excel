@@ -1,42 +1,9 @@
 import pytest
-import tempfile
 from pathlib import Path
-import duckdb
 import pandas as pd
-from mcp_excel.loader import ExcelLoader
-from mcp_excel.naming import TableRegistry
 from mcp_excel.types import SheetOverride
 
-
-@pytest.fixture
-def temp_dir():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        yield Path(tmpdir)
-
-
-@pytest.fixture
-def conn():
-    connection = duckdb.connect(":memory:")
-    yield connection
-    connection.close()
-
-
-@pytest.fixture
-def loader(conn):
-    registry = TableRegistry()
-    return ExcelLoader(conn, registry)
-
-
-@pytest.fixture
-def sample_excel(temp_dir):
-    file_path = temp_dir / "test.xlsx"
-    df = pd.DataFrame({
-        "Name": ["Alice", "Bob", "Charlie"],
-        "Age": [25, 30, 35],
-        "City": ["NYC", "LA", "SF"]
-    })
-    df.to_excel(file_path, sheet_name="Data", index=False)
-    return file_path
+pytestmark = pytest.mark.unit
 
 
 def test_load_raw_mode(loader, sample_excel):

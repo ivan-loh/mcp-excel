@@ -7,6 +7,8 @@ from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp.utilities.tests import run_server_in_process
 import mcp_excel.server as server
 
+pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+
 
 def run_test_server(host: str, port: int) -> None:
     with tempfile.TemporaryDirectory() as tmpdir:

@@ -5,6 +5,8 @@ import pandas as pd
 import re
 import mcp_excel.server as server
 
+pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("setup_server")]
+
 
 def get_sanitized_alias(path: Path) -> str:
     alias = path.name or "excel"
@@ -14,36 +16,6 @@ def get_sanitized_alias(path: Path) -> str:
     alias = re.sub(r'_+', '_', alias)
     alias = alias.strip('_')
     return alias if alias else "excel"
-
-
-@pytest.fixture(autouse=True)
-def setup_server():
-    server.conn = None
-    server.registry = None
-    server.loader = None
-    server.catalog.clear()
-    server.load_configs.clear()
-    server.init_server()
-    yield
-    server.catalog.clear()
-    server.load_configs.clear()
-
-
-@pytest.fixture
-def test_data_dir():
-    with tempfile.TemporaryDirectory(prefix="test_") as tmpdir:
-        tmpdir = Path(tmpdir)
-
-        for i in range(3):
-            df = pd.DataFrame({
-                "Product": [f"Product{j}" for j in range(5)],
-                "Quantity": [10 * (i + 1) + j for j in range(5)],
-                "Price": [100.0 + i * 10 + j for j in range(5)]
-            })
-            file_path = tmpdir / f"sales_{i}.xlsx"
-            df.to_excel(file_path, sheet_name="Summary", index=False)
-
-        yield tmpdir
 
 
 def test_load_multiple_files(test_data_dir):
