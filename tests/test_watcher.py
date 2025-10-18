@@ -3,7 +3,7 @@ import time
 import tempfile
 from pathlib import Path
 import pandas as pd
-from src.watcher import FileWatcher
+from mcp_excel.watcher import FileWatcher
 
 
 @pytest.fixture

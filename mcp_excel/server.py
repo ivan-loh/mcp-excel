@@ -1,4 +1,5 @@
 import time
+import threading
 from pathlib import Path
 from typing import Optional
 import click
@@ -50,7 +51,7 @@ def _create_system_views(alias: str):
     tables_data = []
 
     for table_name, meta in catalog.items():
-        if not table_name.startswith(f"{alias}__"):
+        if not table_name.startswith(f"{alias}."):
             continue
 
         file_key = meta.file
@@ -75,19 +76,19 @@ def _create_system_views(alias: str):
             "mtime": meta.mtime,
         })
 
-    files_view_name = f"{alias}____files"
-    tables_view_name = f"{alias}____tables"
+    files_view_name = f"{alias}.__files"
+    tables_view_name = f"{alias}.__tables"
 
     try:
         if files_data:
             files_df = pd.DataFrame(list(files_data.values()))
-            conn.register(f"{files_view_name}_temp", files_df)
-            conn.execute(f"CREATE OR REPLACE VIEW {files_view_name} AS SELECT * FROM {files_view_name}_temp")
+            conn.register(f"temp_files_{alias}", files_df)
+            conn.execute(f'CREATE OR REPLACE VIEW "{files_view_name}" AS SELECT * FROM temp_files_{alias}')
 
         if tables_data:
             tables_df = pd.DataFrame(tables_data)
-            conn.register(f"{tables_view_name}_temp", tables_df)
-            conn.execute(f"CREATE OR REPLACE VIEW {tables_view_name} AS SELECT * FROM {tables_view_name}_temp")
+            conn.register(f"temp_tables_{alias}", tables_df)
+            conn.execute(f'CREATE OR REPLACE VIEW "{tables_view_name}" AS SELECT * FROM temp_tables_{alias}')
 
         log.info("system_views_created", alias=alias, files_view=files_view_name, tables_view=tables_view_name)
     except Exception as e:
@@ -96,7 +97,7 @@ def _create_system_views(alias: str):
 
 def load_dir(
     path: str,
-    alias: str = "excel",
+    alias: str = None,
     include_glob: list[str] = None,
     exclude_glob: list[str] = None,
     overrides: dict = None,
@@ -108,6 +109,16 @@ def load_dir(
     overrides = overrides or {}
 
     root = validate_root_path(path)
+
+    if alias is None:
+        import re
+        alias = root.name or "excel"
+        alias = alias.lower()
+        alias = re.sub(r"[^a-z0-9_]+", "_", alias)
+        alias = re.sub(r"_+", "_", alias)
+        alias = alias.strip("_")
+        if not alias:
+            alias = "excel"
 
     log.info("load_start", path=str(root), alias=alias, patterns=include_glob)
 
@@ -182,7 +193,7 @@ def load_dir(
         "root": str(root),
         "files_count": files_loaded,
         "sheets_count": sheets_loaded,
-        "tables_count": len([t for t in catalog if t.startswith(f"{alias}__")]),
+        "tables_count": len([t for t in catalog if t.startswith(f"{alias}.")]),
         "rows_estimate": total_rows,
         "cache_mode": "none",
         "materialized": False,
@@ -204,29 +215,41 @@ def query(
 ) -> dict:
     init_server()
 
-    sql_upper = sql.strip().upper()
-    forbidden = ["CREATE", "DROP", "INSERT", "UPDATE", "DELETE", "ALTER", "TRUNCATE"]
-    for keyword in forbidden:
-        if sql_upper.startswith(keyword):
-            log.warn("query_rejected", reason="forbidden_keyword", keyword=keyword)
-            raise ValueError(f"Only SELECT queries allowed, found {keyword}")
-
     start = time.time()
+    interrupted = [False]
+
+    def timeout_handler():
+        interrupted[0] = True
+        try:
+            conn.interrupt()
+        except Exception as e:
+            log.warn("interrupt_failed", error=str(e))
+
+    timer = threading.Timer(timeout_ms / 1000.0, timeout_handler)
+    timer.start()
 
     try:
-        limited_sql = f"SELECT * FROM ({sql}) LIMIT {max_rows + 1}"
-        result = conn.execute(limited_sql).fetchall()
-        columns = [{"name": desc[0], "type": str(desc[1])} for desc in conn.description]
+        conn.execute("BEGIN TRANSACTION READ ONLY")
+        try:
+            cursor = conn.execute(sql)
+            result = cursor.fetchmany(max_rows + 1)
+            columns = [{"name": desc[0], "type": str(desc[1])} for desc in cursor.description]
+            conn.execute("COMMIT")
+        except Exception as e:
+            conn.execute("ROLLBACK")
+            raise e
     except Exception as e:
+        timer.cancel()
+        if interrupted[0]:
+            execution_ms = int((time.time() - start) * 1000)
+            log.warn("query_timeout", execution_ms=execution_ms, timeout_ms=timeout_ms)
+            raise TimeoutError(f"Query exceeded {timeout_ms}ms timeout")
         log.error("query_failed", error=str(e), sql=sql[:100])
         raise RuntimeError(f"Query failed: {e}")
+    finally:
+        timer.cancel()
 
     execution_ms = int((time.time() - start) * 1000)
-
-    if execution_ms > timeout_ms:
-        log.warn("query_timeout", execution_ms=execution_ms, timeout_ms=timeout_ms)
-        raise TimeoutError(f"Query exceeded {timeout_ms}ms timeout")
-
     truncated = len(result) > max_rows
     rows = result[:max_rows]
 
@@ -246,7 +269,7 @@ def list_tables(alias: str = None) -> dict:
 
     tables = []
     for table_name, meta in catalog.items():
-        if alias and not table_name.startswith(f"{alias}__"):
+        if alias and not table_name.startswith(f"{alias}."):
             continue
         tables.append({
             "table": table_name,
@@ -266,7 +289,7 @@ def get_schema(table: str) -> dict:
     if table not in catalog:
         raise ValueError(f"Table {table} not found")
 
-    result = conn.execute(f"DESCRIBE {table}").fetchall()
+    result = conn.execute(f'DESCRIBE "{table}"').fetchall()
     columns = [
         {"name": row[0], "type": row[1], "nullable": row[2] == "YES"}
         for row in result
@@ -285,12 +308,12 @@ def refresh(alias: str = None, full: bool = False) -> dict:
 
         tables_to_drop = []
         for table_name in catalog:
-            if alias is None or table_name.startswith(f"{alias}__"):
+            if alias is None or table_name.startswith(f"{alias}."):
                 tables_to_drop.append(table_name)
 
         for table_name in tables_to_drop:
             try:
-                conn.execute(f"DROP VIEW IF EXISTS {table_name}")
+                conn.execute(f'DROP VIEW IF EXISTS "{table_name}"')
                 del catalog[table_name]
                 dropped += 1
             except Exception:
@@ -314,23 +337,38 @@ def refresh(alias: str = None, full: bool = False) -> dict:
         changed = 0
         for table_name, meta in list(catalog.items()):
             try:
-                current_mtime = Path(meta.file).stat().st_mtime
+                file_path = Path(meta.file)
+
+                if not file_path.exists():
+                    log.warn("refresh_file_missing", table=table_name, file=meta.file)
+                    continue
+
+                current_mtime = file_path.stat().st_mtime
                 if current_mtime > meta.mtime:
                     config = load_configs.get(meta.table_name.split("__")[0])
-                    if config:
-                        file_path = Path(meta.file)
-                        relpath = str(file_path.relative_to(config.root))
-                        override_dict = config.overrides.get(relpath, {}).get("sheet_overrides", {}).get(meta.sheet)
-                        override = None
-                        if override_dict:
-                            override = SheetOverride(**override_dict)
+                    if not config:
+                        log.warn("refresh_no_config", table=table_name)
+                        continue
 
-                        conn.execute(f"DROP VIEW IF EXISTS {table_name}")
-                        new_meta = loader.load_sheet(file_path, relpath, meta.sheet, config.alias, override)
-                        catalog[table_name] = new_meta
-                        changed += 1
-            except Exception:
-                pass
+                    try:
+                        relpath = str(file_path.relative_to(config.root))
+                    except ValueError:
+                        log.warn("refresh_path_outside_root", table=table_name,
+                                file=str(file_path), root=str(config.root))
+                        continue
+
+                    override_dict = config.overrides.get(relpath, {}).get("sheet_overrides", {}).get(meta.sheet)
+                    override = None
+                    if override_dict:
+                        override = SheetOverride(**override_dict)
+
+                    conn.execute(f'DROP VIEW IF EXISTS "{table_name}"')
+                    new_meta = loader.load_sheet(file_path, relpath, meta.sheet, config.alias, override)
+                    catalog[table_name] = new_meta
+                    changed += 1
+            except Exception as e:
+                log.warn("refresh_failed", table=table_name, error=str(e))
+                continue
 
         return {"changed": changed, "total": len(catalog)}
 
@@ -370,68 +408,80 @@ def stop_watching():
 @mcp.tool()
 def tool_load_dir(
     path: str,
-    alias: str = "excel",
+    alias: str = None,
     include_glob: list[str] = None,
     exclude_glob: list[str] = None,
     overrides: dict = None,
 ) -> dict:
     """
-    Load Excel files from directory into DuckDB tables.
+    Load Excel files into DuckDB views.
+
+    Tables: <alias>.<filepath>.<sheet> (dot-separated, requires quotes in SQL)
+    Alias: Auto-generated from directory name (sanitized: lowercase, [a-z0-9_$])
+    System views: <alias>.__files, <alias>.__tables
 
     Modes:
-    - RAW: Load as-is with all_varchar=true, header=false
-    - ASSISTED: Apply per-file overrides for structure cleanup
+    - RAW: all_varchar=true, header=false
+    - ASSISTED: apply sheet_overrides (skip_rows, header_rows, skip_footer, drop_regex,
+                column_renames, type_hints, unpivot)
 
-    Overrides format:
-    {
-        "sales/q1.xlsx": {
-            "sheet_overrides": {
-                "Summary": {
-                    "skip_rows": 3,
-                    "header_rows": 1,
-                    "skip_footer": 2,
-                    "range": "A4:F100",
-                    "drop_regex": "^(Notes|Total):",
-                    "column_renames": {"col_0": "region"}
-                }
-            }
-        }
-    }
+    Example: /data/sales/Q1.xlsx → "sales.q1.summary"
+    Query: SELECT * FROM "sales.q1.summary"
     """
     return load_dir(path, alias, include_glob, exclude_glob, overrides)
 
 
 @mcp.tool()
 def tool_query(sql: str, max_rows: int = 10000, timeout_ms: int = 60000) -> dict:
-    """Execute read-only SQL query with safety limits."""
+    """
+    Execute SQL query in read-only transaction.
+
+    Table names contain dots, require double quotes: SELECT * FROM "alias.file.sheet"
+    Read-only enforced: BEGIN TRANSACTION READ ONLY (blocks DDL/DML at database level)
+    Limits: timeout_ms via conn.interrupt(), max_rows via fetchmany()
+    """
     return query(sql, max_rows, timeout_ms)
 
 
 @mcp.tool()
 def tool_list_tables(alias: str = None) -> dict:
-    """List all loaded tables with metadata."""
+    """
+    List loaded tables with metadata (file, sheet, mode, est_rows).
+
+    Filter: alias="sales" returns tables matching "sales.*"
+    """
     return list_tables(alias)
 
 
 @mcp.tool()
 def tool_get_schema(table: str) -> dict:
-    """Get column schema for a table."""
+    """
+    Get table schema via DESCRIBE.
+
+    Returns: columns[{name, type, nullable}]
+    """
     return get_schema(table)
 
 
 @mcp.tool()
 def tool_refresh(alias: str = None, full: bool = False) -> dict:
-    """Refresh catalog by rescanning directory."""
+    """
+    Refresh tables from filesystem.
+
+    full=False: incremental (mtime check)
+    full=True: drop and reload
+    """
     return refresh(alias, full)
 
 
 @click.command()
-@click.option("--path", required=True, help="Root directory with Excel files")
-@click.option("--alias", default="excel", help="Table name prefix")
+@click.option("--path", default=".", help="Root directory with Excel files (default: current directory)")
 @click.option("--overrides", type=click.Path(exists=True), help="YAML overrides file")
 @click.option("--watch", is_flag=True, default=False, help="Watch for file changes and auto-refresh")
-@click.option("--transport", default="stdio", type=click.Choice(["stdio", "sse"]), help="MCP transport")
-def main(path: str, alias: str, overrides: Optional[str], watch: bool, transport: str):
+@click.option("--transport", default="stdio", type=click.Choice(["stdio", "streamable-http", "sse"]), help="MCP transport (default: stdio)")
+@click.option("--host", default="127.0.0.1", help="Host for HTTP transports (default: 127.0.0.1)")
+@click.option("--port", default=8000, type=int, help="Port for HTTP transports (default: 8000)")
+def main(path: str, overrides: Optional[str], watch: bool, transport: str, host: str, port: int):
     init_server()
 
     overrides_dict = {}
@@ -440,14 +490,18 @@ def main(path: str, alias: str, overrides: Optional[str], watch: bool, transport
             overrides_dict = yaml.safe_load(f) or {}
 
     root_path = Path(path).resolve()
-    load_dir(path=str(root_path), alias=alias, overrides=overrides_dict)
+    load_dir(path=str(root_path), overrides=overrides_dict)
 
     if watch:
         start_watching(root_path)
         log.info("watch_mode_enabled", path=str(root_path))
 
     try:
-        mcp.run(transport=transport)
+        if transport in ["streamable-http", "sse"]:
+            log.info("starting_http_server", transport=transport, host=host, port=port)
+            mcp.run(transport=transport, host=host, port=port)
+        else:
+            mcp.run(transport=transport)
     finally:
         if watch:
             stop_watching()

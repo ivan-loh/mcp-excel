@@ -1,23 +1,23 @@
 import pytest
-from src.naming import TableRegistry
+from mcp_excel.naming import TableRegistry
 
 
 def test_basic_sanitization():
     registry = TableRegistry()
     name = registry.register("excel", "sales/report.xlsx", "Summary")
-    assert name == "excel__sales_report__summary"
+    assert name == "excel.salesreport.summary"
 
 
 def test_special_chars():
     registry = TableRegistry()
     name = registry.register("excel", "data/Q1-2024 (Final).xlsx", "Sheet1")
-    assert name == "excel__data_q1_2024_final__sheet1"
+    assert name == "excel.dataq12024_final.sheet1"
 
 
 def test_unicode():
     registry = TableRegistry()
     name = registry.register("excel", "données/rapport.xlsx", "Feuille")
-    assert name == "excel__donn_es_rapport__feuille"
+    assert name == "excel.donnesrapport.feuille"
 
 
 def test_leading_numbers():
@@ -39,9 +39,9 @@ def test_multiple_collisions():
     name1 = registry.register("excel", "data.xlsx", "Sheet")
     name2 = registry.register("excel", "data.xlsx", "Sheet")
     name3 = registry.register("excel", "data.xlsx", "Sheet")
-    assert name1 == "excel__data__sheet"
-    assert name2 == "excel__data__sheet_2"
-    assert name3 == "excel__data__sheet_3"
+    assert name1 == "excel.data.sheet"
+    assert name2 == "excel.data.sheet_2"
+    assert name3 == "excel.data.sheet_3"
 
 
 def test_long_names():
@@ -55,7 +55,7 @@ def test_empty_components():
     registry = TableRegistry()
     name = registry.register("excel", ".xlsx", "")
     assert name
-    assert "_" in name
+    assert "." in name
 
 
 def test_clear():

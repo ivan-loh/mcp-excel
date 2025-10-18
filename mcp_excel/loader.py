@@ -39,7 +39,7 @@ class ExcelLoader:
     def _load_raw(self, file: Path, relpath: str, sheet: str, table_name: str) -> TableMeta:
         try:
             self.conn.execute(f"""
-                CREATE OR REPLACE VIEW {table_name} AS
+                CREATE OR REPLACE VIEW "{table_name}" AS
                 SELECT * FROM read_xlsx(
                     '{file}',
                     sheet='{sheet}',
@@ -48,7 +48,7 @@ class ExcelLoader:
                 )
             """)
 
-            count_result = self.conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()
+            count_result = self.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
             est_rows = count_result[0] if count_result else 0
 
             return TableMeta(
@@ -106,10 +106,11 @@ class ExcelLoader:
             if override.unpivot:
                 df = self._apply_unpivot(df, override.unpivot)
 
-            temp_view = f"{table_name}_temp"
+            import hashlib
+            temp_view = f"temp_{hashlib.md5(table_name.encode()).hexdigest()[:8]}"
             self.conn.register(temp_view, df)
             self.conn.execute(f"""
-                CREATE OR REPLACE VIEW {table_name} AS
+                CREATE OR REPLACE VIEW "{table_name}" AS
                 SELECT * FROM {temp_view}
             """)
 

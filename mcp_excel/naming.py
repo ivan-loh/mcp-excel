@@ -28,7 +28,7 @@ class TableRegistry:
         if len(sanitized_parts) == 1:
             sanitized_parts.append("table")
 
-        name = "__".join(sanitized_parts)
+        name = ".".join(sanitized_parts)
 
         if name and name[0].isdigit():
             name = f"t_{name}"
@@ -42,9 +42,10 @@ class TableRegistry:
 
     def _sanitize_component(self, component: str) -> str:
         component = component.lower()
-        component = re.sub(r"[^a-z0-9_]+", "_", component)
-        component = re.sub(r"_+", "_", component)
-        component = component.strip("_")
+        component = component.replace(' ', '_')
+        component = re.sub(r'[^a-z0-9_$]', '', component)
+        component = re.sub(r'_+', '_', component)
+        component = component.strip('_')
         return component
 
     def _handle_collision(self, name: str) -> str:

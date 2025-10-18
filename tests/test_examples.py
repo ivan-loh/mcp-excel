@@ -1,6 +1,6 @@
 import pytest
 from pathlib import Path
-import src.server as server
+import mcp_excel.server as server
 
 
 @pytest.fixture(autouse=True)
@@ -21,7 +21,7 @@ def test_load_examples_directory():
     if not examples_dir.exists():
         pytest.skip("Examples directory not found")
 
-    result = server.load_dir(path=str(examples_dir), alias="demo")
+    result = server.load_dir(path=str(examples_dir))
 
     assert result["files_count"] >= 7
     assert result["sheets_count"] >= 8
@@ -33,9 +33,10 @@ def test_load_clean_data_raw_mode():
     if not (examples_dir / "clean_data.xlsx").exists():
         pytest.skip("clean_data.xlsx not found")
 
-    result = server.load_dir(path=str(examples_dir), alias="demo")
+    alias = examples_dir.name
+    result = server.load_dir(path=str(examples_dir))
 
-    tables = server.list_tables(alias="demo")
+    tables = server.list_tables(alias=alias)
     clean_tables = [t for t in tables["tables"] if "clean_data" in t["table"]]
 
     assert len(clean_tables) >= 1
@@ -47,9 +48,10 @@ def test_query_clean_data():
     if not (examples_dir / "clean_data.xlsx").exists():
         pytest.skip("clean_data.xlsx not found")
 
-    server.load_dir(path=str(examples_dir), alias="demo")
+    alias = examples_dir.name
+    server.load_dir(path=str(examples_dir))
 
-    result = server.query("SELECT COUNT(*) as count FROM demo__clean_data__orders")
+    result = server.query(f'SELECT COUNT(*) as count FROM "{alias}.clean_data.orders"')
 
     assert result["row_count"] == 1
     assert result["rows"][0][0] == 6
@@ -66,7 +68,7 @@ def test_load_with_overrides():
     with open(overrides_file) as f:
         overrides = yaml.safe_load(f)
 
-    result = server.load_dir(path=str(examples_dir), alias="demo", overrides=overrides)
+    result = server.load_dir(path=str(examples_dir), overrides=overrides)
 
     assert result["files_count"] >= 6
 
@@ -76,12 +78,13 @@ def test_system_views_with_examples():
     if not examples_dir.exists():
         pytest.skip("Examples directory not found")
 
-    server.load_dir(path=str(examples_dir), alias="demo")
+    alias = examples_dir.name
+    server.load_dir(path=str(examples_dir))
 
-    files_result = server.query("SELECT COUNT(*) as count FROM demo____files")
+    files_result = server.query(f'SELECT COUNT(*) as count FROM "{alias}.__files"')
     assert files_result["row_count"] == 1
     assert files_result["rows"][0][0] >= 7
 
-    tables_result = server.query("SELECT COUNT(*) as count FROM demo____tables")
+    tables_result = server.query(f'SELECT COUNT(*) as count FROM "{alias}.__tables"')
     assert tables_result["row_count"] == 1
     assert tables_result["rows"][0][0] >= 8

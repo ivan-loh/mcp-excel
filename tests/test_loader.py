@@ -3,9 +3,9 @@ import tempfile
 from pathlib import Path
 import duckdb
 import pandas as pd
-from src.loader import ExcelLoader
-from src.naming import TableRegistry
-from src.types import SheetOverride
+from mcp_excel.loader import ExcelLoader
+from mcp_excel.naming import TableRegistry
+from mcp_excel.types import SheetOverride
 
 
 @pytest.fixture
@@ -103,7 +103,7 @@ def test_column_renames(temp_dir, loader):
     override = SheetOverride(column_renames={"OldName": "NewName"}, header_rows=1)
     meta = loader.load_sheet(file_path, "rename_test.xlsx", "Data", "excel", override)
 
-    result = loader.conn.execute(f"DESCRIBE {meta.table_name}").fetchall()
+    result = loader.conn.execute(f'DESCRIBE "{meta.table_name}"').fetchall()
     column_names = [row[0] for row in result]
     assert "NewName" in column_names or "newname" in column_names
 
@@ -128,7 +128,7 @@ def test_multirow_headers(temp_dir, loader):
     override = SheetOverride(header_rows=2)
     meta = loader.load_sheet(file_path, "multirow_test.xlsx", "Data", "excel", override)
 
-    result = loader.conn.execute(f"SELECT * FROM {meta.table_name} LIMIT 1").fetchall()
+    result = loader.conn.execute(f'SELECT * FROM "{meta.table_name}" LIMIT 1').fetchall()
     assert len(result) > 0
     assert meta.est_rows == 2
 
@@ -153,7 +153,7 @@ def test_type_hints(temp_dir, loader):
     )
     meta = loader.load_sheet(file_path, "types_test.xlsx", "Data", "excel", override)
 
-    result = loader.conn.execute(f"SELECT * FROM {meta.table_name} LIMIT 1").fetchall()
+    result = loader.conn.execute(f'SELECT * FROM "{meta.table_name}" LIMIT 1').fetchall()
     assert len(result) > 0
 
 
@@ -178,5 +178,5 @@ def test_unpivot(temp_dir, loader):
     )
     meta = loader.load_sheet(file_path, "unpivot_test.xlsx", "Data", "excel", override)
 
-    result = loader.conn.execute(f"SELECT COUNT(*) FROM {meta.table_name}").fetchone()
+    result = loader.conn.execute(f'SELECT COUNT(*) FROM "{meta.table_name}"').fetchone()
     assert result[0] == 6
