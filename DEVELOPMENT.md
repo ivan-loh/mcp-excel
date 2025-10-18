@@ -324,8 +324,12 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "excel": {
-      "command": "mcp-excel",
-      "args": ["--path", "/Users/your-username/data/excel"]
+      "command": "uvx",
+      "args": [
+        "mcp-server-excel-sql",
+        "--path",
+        "/Users/your-username/data/excel"
+      ]
     }
   }
 }
@@ -333,7 +337,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 **Local development:**
 ```bash
-mcp-excel --path /data/excel --watch
+uvx mcp-server-excel-sql --path /data/excel --watch
 ```
 
 ### Multi-User (HTTP/SSE)
@@ -341,7 +345,7 @@ mcp-excel --path /data/excel --watch
 **Basic setup:**
 ```bash
 # Start server on port 8000
-mcp-excel --path /data/excel --transport sse --port 8000
+uvx mcp-server-excel-sql --path /data/excel --transport sse --port 8000
 ```
 
 **With authentication:**
@@ -350,7 +354,7 @@ mcp-excel --path /data/excel --transport sse --port 8000
 export MCP_EXCEL_API_KEY=your-secret-key
 
 # Start server with authentication required
-mcp-excel --path /data/excel --transport sse --port 8000 --require-auth
+uvx mcp-server-excel-sql --path /data/excel --transport sse --port 8000 --require-auth
 ```
 
 **Client authentication:**
@@ -549,7 +553,7 @@ curl -H "Authorization: Bearer $MCP_EXCEL_API_KEY" http://localhost:8000/sse
 **Debug steps:**
 ```bash
 # Verify server is running
-ps aux | grep mcp-excel
+ps aux | grep mcp-server-excel-sql
 
 # Test connection
 curl http://localhost:8000/health  # If health endpoint exists
@@ -598,7 +602,7 @@ curl http://localhost:8000/health  # If health endpoint exists
 **Debug:**
 ```bash
 # Monitor memory usage
-top -p $(pgrep mcp-excel)
+top -p $(pgrep -f mcp-server-excel-sql)
 
 # Check for memory leaks (run stress tests)
 pytest tests/test_stress_concurrency.py::test_stress_no_memory_leaks

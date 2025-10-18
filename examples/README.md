@@ -35,7 +35,7 @@ python examples/create_finance_examples.py
 
 ```bash
 # Load with proper headers and type hints
-mcp-excel --path examples --alias finance --overrides examples/finance_overrides.yaml --watch
+uvx mcp-server-excel-sql --path examples --overrides examples/finance_overrides.yaml --watch
 ```
 
 ## Prompt Chain Sequences
@@ -48,7 +48,7 @@ Interactive analysis journeys demonstrating how to explore Kopitiam Kita's finan
 
 ```
 Step 1: "Load the finance examples with proper type hints"
-→ mcp-excel --path examples --alias finance --overrides examples/finance_overrides.yaml
+→ uvx mcp-server-excel-sql --path examples --overrides examples/finance_overrides.yaml
 
 Step 2: "Show me all available tables"
 → SELECT * FROM "finance.__tables";
