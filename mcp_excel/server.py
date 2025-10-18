@@ -78,17 +78,27 @@ def _create_system_views(alias: str):
 
     files_view_name = f"{alias}.__files"
     tables_view_name = f"{alias}.__tables"
+    temp_files_table = f"temp_files_{alias}"
+    temp_tables_table = f"temp_tables_{alias}"
 
     try:
         if files_data:
             files_df = pd.DataFrame(list(files_data.values()))
-            conn.register(f"temp_files_{alias}", files_df)
-            conn.execute(f'CREATE OR REPLACE VIEW "{files_view_name}" AS SELECT * FROM temp_files_{alias}')
+            try:
+                conn.unregister(temp_files_table)
+            except:
+                pass
+            conn.register(temp_files_table, files_df)
+            conn.execute(f'CREATE OR REPLACE VIEW "{files_view_name}" AS SELECT * FROM {temp_files_table}')
 
         if tables_data:
             tables_df = pd.DataFrame(tables_data)
-            conn.register(f"temp_tables_{alias}", tables_df)
-            conn.execute(f'CREATE OR REPLACE VIEW "{tables_view_name}" AS SELECT * FROM temp_tables_{alias}')
+            try:
+                conn.unregister(temp_tables_table)
+            except:
+                pass
+            conn.register(temp_tables_table, tables_df)
+            conn.execute(f'CREATE OR REPLACE VIEW "{tables_view_name}" AS SELECT * FROM {temp_tables_table}')
 
         log.info("system_views_created", alias=alias, files_view=files_view_name, tables_view=tables_view_name)
     except Exception as e:
@@ -217,6 +227,7 @@ def query(
 
     start = time.time()
     interrupted = [False]
+    transaction_started = [False]
 
     def timeout_handler():
         interrupted[0] = True
@@ -228,18 +239,21 @@ def query(
     timer = threading.Timer(timeout_ms / 1000.0, timeout_handler)
     timer.start()
 
+    result = None
+    columns = None
+
     try:
         conn.execute("BEGIN TRANSACTION READ ONLY")
-        try:
-            cursor = conn.execute(sql)
-            result = cursor.fetchmany(max_rows + 1)
-            columns = [{"name": desc[0], "type": str(desc[1])} for desc in cursor.description]
-            conn.execute("COMMIT")
-        except Exception as e:
-            conn.execute("ROLLBACK")
-            raise e
+        transaction_started[0] = True
+
+        cursor = conn.execute(sql)
+        result = cursor.fetchmany(max_rows + 1)
+        columns = [{"name": desc[0], "type": str(desc[1])} for desc in cursor.description]
+
+        conn.execute("COMMIT")
+        transaction_started[0] = False
+
     except Exception as e:
-        timer.cancel()
         if interrupted[0]:
             execution_ms = int((time.time() - start) * 1000)
             log.warn("query_timeout", execution_ms=execution_ms, timeout_ms=timeout_ms)
@@ -248,6 +262,13 @@ def query(
         raise RuntimeError(f"Query failed: {e}")
     finally:
         timer.cancel()
+
+        if transaction_started[0]:
+            try:
+                conn.execute("ROLLBACK")
+                log.info("transaction_rolled_back", reason="cleanup")
+            except Exception as rollback_error:
+                log.warn("rollback_failed", error=str(rollback_error))
 
     execution_ms = int((time.time() - start) * 1000)
     truncated = len(result) > max_rows
@@ -345,9 +366,9 @@ def refresh(alias: str = None, full: bool = False) -> dict:
 
                 current_mtime = file_path.stat().st_mtime
                 if current_mtime > meta.mtime:
-                    config = load_configs.get(meta.table_name.split("__")[0])
+                    config = load_configs.get(meta.alias)
                     if not config:
-                        log.warn("refresh_no_config", table=table_name)
+                        log.warn("refresh_no_config", table=table_name, alias=meta.alias)
                         continue
 
                     try:

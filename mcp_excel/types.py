@@ -11,6 +11,7 @@ class TableMeta:
     sheet: str
     mode: str
     mtime: float
+    alias: str
     est_rows: int = 0
 
 

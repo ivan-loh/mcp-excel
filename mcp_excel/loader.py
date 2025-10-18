@@ -32,11 +32,11 @@ class ExcelLoader:
         table_name = self.registry.register(alias, relpath, sheet)
 
         if override:
-            return self._load_assisted(file, relpath, sheet, table_name, override)
+            return self._load_assisted(file, relpath, sheet, table_name, alias, override)
         else:
-            return self._load_raw(file, relpath, sheet, table_name)
+            return self._load_raw(file, relpath, sheet, table_name, alias)
 
-    def _load_raw(self, file: Path, relpath: str, sheet: str, table_name: str) -> TableMeta:
+    def _load_raw(self, file: Path, relpath: str, sheet: str, table_name: str, alias: str) -> TableMeta:
         try:
             self.conn.execute(f"""
                 CREATE OR REPLACE VIEW "{table_name}" AS
@@ -58,6 +58,7 @@ class ExcelLoader:
                 sheet=sheet,
                 mode="RAW",
                 mtime=file.stat().st_mtime,
+                alias=alias,
                 est_rows=est_rows,
             )
         except Exception as e:
@@ -66,7 +67,7 @@ class ExcelLoader:
             raise RuntimeError(f"Failed to load {file}:{sheet} in RAW mode: {error_msg}{suggestion}")
 
     def _load_assisted(
-        self, file: Path, relpath: str, sheet: str, table_name: str, override: SheetOverride
+        self, file: Path, relpath: str, sheet: str, table_name: str, alias: str, override: SheetOverride
     ) -> TableMeta:
         try:
             if override.header_rows > 1:
@@ -121,6 +122,7 @@ class ExcelLoader:
                 sheet=sheet,
                 mode="ASSISTED",
                 mtime=file.stat().st_mtime,
+                alias=alias,
                 est_rows=len(df),
             )
         except Exception as e:
