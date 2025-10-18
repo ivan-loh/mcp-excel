@@ -103,7 +103,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "excel": {
+    "finance-data": {
       "command": "mcp-excel",
       "args": ["--path", "/Users/your-username/data/excel"]
     }
@@ -115,7 +115,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "excel": {
+    "finance-data": {
       "command": "mcp-excel",
       "args": [
         "--path", "/path/to/excel/files",
@@ -125,6 +125,8 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
   }
 }
 ```
+
+**Naming tip:** Use descriptive names like `finance-data`, `sales-reports`, or `excel` for easy reference in conversations.
 
 Restart Claude Desktop after saving the configuration.
 

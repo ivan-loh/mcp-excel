@@ -326,7 +326,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "excel": {
+    "finance-data": {
       "command": "mcp-excel",
       "args": ["--path", "/Users/your-username/data/excel"]
     }
