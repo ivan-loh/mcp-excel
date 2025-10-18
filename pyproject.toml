@@ -1,21 +1,25 @@
 [project]
 name = "mcp-server-excel-sql"
 version = "0.3.1"
-description = "MCP server that exposes Excel files as SQL-queryable tables via DuckDB"
+description = "Let Claude query Excel files using SQL - no SQL knowledge required"
 authors = [{name = "Ivan", email = "ivan@eriad.com"}]
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
-keywords = ["mcp", "excel", "sql", "duckdb", "server"]
+keywords = ["mcp", "excel", "sql", "duckdb", "claude", "ai", "assistant", "analytics", "data-analysis"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "Intended Audience :: Financial and Insurance Industry",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Database",
     "Topic :: Office/Business",
+    "Topic :: Office/Business :: Financial :: Spreadsheet",
+    "Topic :: Scientific/Engineering :: Information Analysis",
 ]
 
 dependencies = [
