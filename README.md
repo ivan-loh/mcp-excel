@@ -46,16 +46,26 @@ Let Claude query your Excel files using SQL - no SQL knowledge required. Ask que
 - uv ([installation guide](https://docs.astral.sh/uv/getting-started/installation/))
 
 ```bash
-uvx mcp-server-excel-sql --path /path/to/excel/files
+uv tool install mcp-server-excel-sql
 ```
 
-No installation needed - uvx runs the server directly with automatic dependency management.
+This creates the `mcp-excel` command for fast startup. Required for Claude Desktop.
+
+**Quick test alternative:**
+```bash
+uvx --from mcp-server-excel-sql mcp-excel --path /path
+```
+
+Slower startup (~10-15s) due to dependency resolution on each run. Use `uv tool install` for regular use.
 
 ## Try It Now
 
 Get running in 30 seconds with example data:
 
 ```bash
+# Install
+uv tool install mcp-server-excel-sql
+
 # Clone examples
 git clone https://github.com/ivan-loh/mcp-excel.git
 cd mcp-excel
@@ -64,10 +74,10 @@ cd mcp-excel
 python examples/create_finance_examples.py
 
 # Start server
-uvx mcp-server-excel-sql --path examples
+mcp-excel --path examples
 ```
 
-Server runs immediately with 10 financial Excel files loaded. Use with Claude Desktop or query directly.
+Server starts instantly with 10 financial Excel files loaded. Use with Claude Desktop or query directly.
 
 ## Quick Start
 
@@ -75,16 +85,18 @@ Server runs immediately with 10 financial Excel files loaded. Use with Claude De
 
 ```bash
 # Single user (local development)
-uvx mcp-server-excel-sql --path /path/to/excel/files
+mcp-excel --path /path/to/excel/files
 
 # With auto-refresh when files change
-uvx mcp-server-excel-sql --path /path/to/excel/files --watch
+mcp-excel --path /path/to/excel/files --watch
 
 # Multiple concurrent users (team deployment)
-uvx mcp-server-excel-sql --path /path/to/excel/files --transport sse --port 8000
+mcp-excel --path /path/to/excel/files --transport sse --port 8000
 ```
 
 ### Claude Desktop
+
+**Prerequisites:** Run `uv tool install mcp-server-excel-sql` first.
 
 Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
@@ -92,12 +104,8 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "excel": {
-      "command": "uvx",
-      "args": [
-        "mcp-server-excel-sql",
-        "--path",
-        "/Users/your-username/data/excel"
-      ]
+      "command": "mcp-excel",
+      "args": ["--path", "/Users/your-username/data/excel"]
     }
   }
 }
@@ -108,9 +116,8 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "excel": {
-      "command": "uvx",
+      "command": "mcp-excel",
       "args": [
-        "mcp-server-excel-sql",
         "--path", "/path/to/excel/files",
         "--overrides", "/path/to/config.yaml"
       ]
@@ -186,7 +193,7 @@ The repository includes example Excel files with financial data for a Malaysian 
 **Generate examples:**
 ```bash
 python examples/create_finance_examples.py
-uvx mcp-server-excel-sql --path examples --overrides examples/finance_overrides.yaml
+mcp-excel --path examples --overrides examples/finance_overrides.yaml
 ```
 
 **Example queries:**
@@ -311,7 +318,7 @@ sales.xlsx:
 
 Run with overrides:
 ```bash
-uvx mcp-server-excel-sql --path /data --overrides config.yaml
+mcp-excel --path /data --overrides config.yaml
 ```
 
 See `examples/finance_overrides.yaml` for complete real-world examples.
@@ -324,7 +331,7 @@ See `examples/finance_overrides.yaml` for complete real-world examples.
 ## CLI Options
 
 ```bash
-uvx mcp-server-excel-sql [OPTIONS]
+mcp-excel [OPTIONS]
 ```
 
 **Options:**

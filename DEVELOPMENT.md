@@ -319,17 +319,16 @@ class APIKeyMiddleware:
 ### Single User (STDIO)
 
 **Claude Desktop:**
+
+Prerequisites: `uv tool install mcp-server-excel-sql`
+
 Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
     "excel": {
-      "command": "uvx",
-      "args": [
-        "mcp-server-excel-sql",
-        "--path",
-        "/Users/your-username/data/excel"
-      ]
+      "command": "mcp-excel",
+      "args": ["--path", "/Users/your-username/data/excel"]
     }
   }
 }
@@ -337,7 +336,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 **Local development:**
 ```bash
-uvx mcp-server-excel-sql --path /data/excel --watch
+mcp-excel --path /data/excel --watch
 ```
 
 ### Multi-User (HTTP/SSE)
@@ -345,7 +344,7 @@ uvx mcp-server-excel-sql --path /data/excel --watch
 **Basic setup:**
 ```bash
 # Start server on port 8000
-uvx mcp-server-excel-sql --path /data/excel --transport sse --port 8000
+mcp-excel --path /data/excel --transport sse --port 8000
 ```
 
 **With authentication:**
@@ -354,7 +353,7 @@ uvx mcp-server-excel-sql --path /data/excel --transport sse --port 8000
 export MCP_EXCEL_API_KEY=your-secret-key
 
 # Start server with authentication required
-uvx mcp-server-excel-sql --path /data/excel --transport sse --port 8000 --require-auth
+mcp-excel --path /data/excel --transport sse --port 8000 --require-auth
 ```
 
 **Client authentication:**
