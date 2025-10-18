@@ -18,8 +18,40 @@ pipx install mcp-server-excel-sql
 
 ## Usage
 
+### CLI
+
 ```bash
 mcp-excel --path /data/excel --watch --overrides config.yaml
+```
+
+### Claude Desktop
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "excel": {
+      "command": "mcp-excel",
+      "args": ["--path", "/Users/your-username/data/excel"]
+    }
+  }
+}
+```
+
+With overrides:
+```json
+{
+  "mcpServers": {
+    "excel": {
+      "command": "mcp-excel",
+      "args": [
+        "--path", "/path/to/excel/files",
+        "--overrides", "/path/to/config.yaml"
+      ]
+    }
+  }
+}
 ```
 
 ## MCP Tools
