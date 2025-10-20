@@ -20,6 +20,98 @@ The server provides SQL access to Excel files through two modes:
 
 Key design philosophy: Simplicity and isolation over performance optimization.
 
+**Architecture Diagram:**
+
+```mermaid
+graph TD
+    Start([CLI Entry: mcp-excel]) --> Main[main function<br>Parse --path --transport --overrides]
+    Main --> Init{init_server<br>Check transport mode}
+
+    Init -->|STDIO mode| StdioPath[:memory: database<br>Single shared connection<br>0% overhead]
+    Init -->|HTTP/SSE mode| HttpPath[Temp file database<br>Isolated connections per request<br>0.6ms overhead]
+
+    StdioPath --> CoreComponents
+    HttpPath --> CoreComponents
+
+    CoreComponents[Core Components Initialized] --> Registry[TableRegistry<br>naming.py]
+    CoreComponents --> LoaderComp[ExcelLoader<br>loader.py]
+
+    Main --> ParseOverrides{YAML<br>overrides<br>provided?}
+    ParseOverrides -->|Yes| Overrides[SheetOverride configs<br>Skip rows, type hints, etc]
+    ParseOverrides -->|No| LoadDir
+    Overrides --> LoadDir
+
+    LoadDir[load_dir<br>Scan *.xlsx files] --> Excel[(Excel Files)]
+    Excel --> LoadSheet[ExcelLoader.load_sheet<br>Per sheet processing]
+    LoadSheet --> DuckDB[(DuckDB Views<br>One view per sheet)]
+    LoadSheet --> CatalogUpdate[Update Catalog<br>TableMeta storage]
+    CatalogUpdate --> Locks{Thread Safety}
+    Locks --> CatalogLock[_catalog_lock: RLock<br>Protects metadata]
+    Locks --> ConfigLock[_load_configs_lock: RLock<br>Protects configurations]
+
+    Main --> WatchFlag{--watch<br>enabled?}
+    WatchFlag -->|Yes| FileWatcher[FileWatcher<br>watcher.py<br>Debounced file monitoring]
+    WatchFlag -->|No| StartMCP
+    FileWatcher -.->|File change detected| ToolRefresh
+
+    Main --> AuthFlag{--require-auth<br>enabled?}
+    AuthFlag -->|Yes HTTP/SSE| Auth[APIKeyMiddleware<br>auth.py<br>Bearer token validation]
+    AuthFlag -->|No or STDIO| StartMCP
+    Auth --> StartMCP
+
+    StartMCP[FastMCP Server Running] --> Tools[4 MCP Tools Exposed]
+
+    Tools --> ToolQuery[tool_query<br>Execute SQL queries]
+    Tools --> ToolList[tool_list_tables<br>Discover tables]
+    Tools --> ToolSchema[tool_get_schema<br>Column metadata]
+    Tools --> ToolRefresh[tool_refresh<br>Reload data]
+
+    ToolQuery --> QueryFunc[query function<br>Read-only transaction<br>Timeout + row limits]
+    ToolList --> ListFunc[list_tables function<br>Return catalog entries]
+    ToolSchema --> SchemaFunc[get_schema function<br>DESCRIBE table]
+    ToolRefresh --> RefreshFunc[refresh function<br>Incremental or full]
+
+    QueryFunc --> ConnMgmt{get_connection}
+    ListFunc --> CatalogRead[Read from catalog dict]
+    SchemaFunc --> ConnMgmt
+    RefreshFunc --> LoadSheet
+
+    ConnMgmt -->|STDIO| SharedConn[Shared :memory: conn]
+    ConnMgmt -->|HTTP| IsolatedConn[New connection per request<br>Timeout isolation]
+
+    SharedConn --> DuckDB
+    IsolatedConn --> DuckDB
+
+    DuckDB --> Results[JSON Results<br>columns, rows, metadata]
+    CatalogRead --> Results
+
+    Client([Claude or MCP Client]) -.->|Calls tools via MCP| Tools
+    Results -.->|Returns data| Client
+
+    classDef entry fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    classDef core fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef storage fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef tool fill:#e8f5e9,stroke:#388e3c,stroke-width:2px
+    classDef optional fill:#fff9c4,stroke:#f57f17,stroke-width:1px,stroke-dasharray: 5 5
+    classDef safety fill:#ffebee,stroke:#c62828,stroke-width:2px
+
+    class Start,Main,Client entry
+    class Init,CoreComponents,Registry,LoaderComp,StartMCP,Tools core
+    class Excel,DuckDB,CatalogUpdate,CatalogRead,Results storage
+    class ToolQuery,ToolList,ToolSchema,ToolRefresh,QueryFunc,ListFunc,SchemaFunc,RefreshFunc tool
+    class FileWatcher,Auth,WatchFlag,AuthFlag optional
+    class Locks,CatalogLock,ConfigLock safety
+```
+
+**Diagram Legend:**
+- **Blue (Entry points)**: CLI entry and client interactions
+- **Orange (Core components)**: Main server components and initialization
+- **Purple (Storage)**: Data storage and retrieval
+- **Green (Tools)**: MCP tools and their functions
+- **Yellow (Optional)**: Optional features (watch mode, authentication)
+- **Red (Safety)**: Thread safety mechanisms
+- **Dashed lines**: Asynchronous or conditional flows
+
 ### Transport Modes
 
 #### STDIO Mode (Default)
