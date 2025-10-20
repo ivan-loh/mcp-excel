@@ -22,18 +22,18 @@ from . import logging as log
 
 mcp = FastMCP("mcp-server-excel-sql")
 
-catalog: dict[str, TableMeta] = {}
+catalog: dict[str, TableMeta]             = {}
 conn: Optional[duckdb.DuckDBPyConnection] = None
-registry: Optional[TableRegistry] = None
-loader: Optional[ExcelLoader] = None
-load_configs: dict[str, LoadConfig] = {}
-watcher: Optional[FileWatcher] = None
+registry: Optional[TableRegistry]         = None
+loader: Optional[ExcelLoader]             = None
+load_configs: dict[str, LoadConfig]       = {}
+watcher: Optional[FileWatcher]            = None
 
-_catalog_lock = threading.RLock()
-_load_configs_lock = threading.RLock()
-_registry_lock = threading.RLock()
+_catalog_lock           = threading.RLock()
+_load_configs_lock      = threading.RLock()
+_registry_lock          = threading.RLock()
 _db_path: Optional[str] = None
-_use_http_mode = False
+_use_http_mode          = False
 
 
 def init_server(use_http_mode: bool = False):
