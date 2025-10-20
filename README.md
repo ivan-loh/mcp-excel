@@ -4,6 +4,7 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![MCP Server](https://img.shields.io/badge/MCP-Server-blue.svg)](https://modelcontextprotocol.io)
+[![Test](https://github.com/ivan-loh/mcp-excel/actions/workflows/test.yml/badge.svg)](https://github.com/ivan-loh/mcp-excel/actions)
 
 Let Claude query your Excel files using SQL - no SQL knowledge required. Ask questions in plain English, Claude writes and executes the queries automatically.
 
