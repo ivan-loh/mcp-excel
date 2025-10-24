@@ -4,18 +4,9 @@ from pathlib import Path
 import pandas as pd
 import re
 import mcp_excel.server as server
+from conftest import get_sanitized_alias
 
 pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("setup_server")]
-
-
-def get_sanitized_alias(path: Path) -> str:
-    alias = path.name or "excel"
-    alias = alias.lower()
-    alias = alias.replace(' ', '_')
-    alias = re.sub(r'[^a-z0-9_$]', '', alias)
-    alias = re.sub(r'_+', '_', alias)
-    alias = alias.strip('_')
-    return alias if alias else "excel"
 
 
 def test_load_multiple_files(test_data_dir):

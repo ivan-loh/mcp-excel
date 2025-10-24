@@ -199,7 +199,7 @@ def load_dir(
     exclude_glob: list[str] = None,
     overrides: dict = None,
 ) -> dict:
-    include_glob = include_glob or ["**/*.xlsx"]
+    include_glob = include_glob or ["**/*.xlsx", "**/*.xlsm", "**/*.xls", "**/*.csv", "**/*.tsv"]
     exclude_glob = exclude_glob or []
     overrides = overrides or {}
 

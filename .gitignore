@@ -22,3 +22,5 @@ CLAUDE.md
 *.whl
 *.tar.gz
 .python-version
+.mcp.json
+.claude/

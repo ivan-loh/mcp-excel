@@ -16,16 +16,20 @@ class ExcelFileHandler(FileSystemEventHandler):
         self.lock = threading.Lock()
 
     def on_modified(self, event: FileSystemEvent):
-        if not event.is_directory and event.src_path.endswith('.xlsx'):
+        if not event.is_directory and self._is_supported_file(event.src_path):
             self._schedule_callback()
 
     def on_created(self, event: FileSystemEvent):
-        if not event.is_directory and event.src_path.endswith('.xlsx'):
+        if not event.is_directory and self._is_supported_file(event.src_path):
             self._schedule_callback()
 
     def on_deleted(self, event: FileSystemEvent):
-        if not event.is_directory and event.src_path.endswith('.xlsx'):
+        if not event.is_directory and self._is_supported_file(event.src_path):
             self._schedule_callback()
+
+    def _is_supported_file(self, path: str) -> bool:
+        supported_extensions = ['.xlsx', '.xlsm', '.xls', '.csv', '.tsv']
+        return any(path.endswith(ext) for ext in supported_extensions)
 
     def _schedule_callback(self):
         with self.lock:

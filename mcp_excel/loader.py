@@ -6,12 +6,14 @@ import duckdb
 
 from .types import SheetOverride, TableMeta
 from .naming import TableRegistry
+from .formats.manager import FormatManager
 
 
 class ExcelLoader:
     def __init__(self, conn: duckdb.DuckDBPyConnection, registry: TableRegistry):
         self.conn = conn
         self.registry = registry
+        self.format_manager = FormatManager()
         self._ensure_excel_extension()
 
     def _ensure_excel_extension(self):
@@ -38,18 +40,34 @@ class ExcelLoader:
 
     def _load_raw(self, file: Path, relpath: str, sheet: str, table_name: str, alias: str) -> TableMeta:
         try:
-            self.conn.execute(f"""
-                CREATE OR REPLACE VIEW "{table_name}" AS
-                SELECT * FROM read_xlsx(
-                    '{file}',
-                    sheet='{sheet}',
-                    header=false,
-                    all_varchar=true
-                )
-            """)
+            # Check file extension to decide loading strategy
+            if file.suffix.lower() not in ['.xlsx', '.xlsm']:
+                # Use format manager for non-Excel files
+                df = self.format_manager.load_file(file, sheet, {'normalize': False})
 
-            count_result = self.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
-            est_rows = count_result[0] if count_result else 0
+                # Register with a temporary name to avoid catalog issues
+                import hashlib
+                temp_table = f"temp_{hashlib.md5(table_name.encode()).hexdigest()[:8]}"
+                self.conn.register(temp_table, df)
+
+                self.conn.execute(f"""
+                    CREATE OR REPLACE VIEW "{table_name}" AS
+                    SELECT * FROM {temp_table}
+                """)
+                est_rows = len(df)
+            else:
+                # Use DuckDB for Excel files
+                self.conn.execute(f"""
+                    CREATE OR REPLACE VIEW "{table_name}" AS
+                    SELECT * FROM read_xlsx(
+                        '{file}',
+                        sheet='{sheet}',
+                        header=false,
+                        all_varchar=true
+                    )
+                """)
+                count_result = self.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
+                est_rows = count_result[0] if count_result else 0
 
             return TableMeta(
                 table_name=table_name,
@@ -70,7 +88,31 @@ class ExcelLoader:
         self, file: Path, relpath: str, sheet: str, table_name: str, alias: str, override: SheetOverride
     ) -> TableMeta:
         try:
-            if override.header_rows > 1:
+            # Check file extension to decide loading strategy
+            if file.suffix.lower() not in ['.xlsx', '.xlsm']:
+                # Use format manager for non-Excel files
+                options = {
+                    'skip_rows': override.skip_rows,
+                    'header_rows': override.header_rows,
+                    'skip_footer': override.skip_footer,
+                    'normalize': True,
+                }
+                df = self.format_manager.load_file(file, sheet, options)
+
+                # Apply additional overrides
+                if override.drop_regex and len(df.columns) > 0:
+                    first_col = df.columns[0]
+                    df = df[~df[first_col].astype(str).str.match(override.drop_regex, na=False)]
+
+                if override.column_renames:
+                    df = df.rename(columns=override.column_renames)
+
+                if override.type_hints:
+                    df = self._apply_type_hints(df, override.type_hints)
+
+                if override.unpivot:
+                    df = self._apply_unpivot(df, override.unpivot)
+            elif override.header_rows > 1:
                 df = self._load_multirow_header(file, sheet, override)
             else:
                 has_header = override.header_rows > 0
@@ -86,26 +128,26 @@ class ExcelLoader:
                     )
                 """).df()
 
-            if override.skip_rows > 0 and not override.range and override.header_rows <= 1:
-                df = df.iloc[override.skip_rows:]
+                if override.skip_rows > 0 and not override.range and override.header_rows <= 1:
+                    df = df.iloc[override.skip_rows:]
 
-            if override.skip_footer > 0:
-                df = df.iloc[:-override.skip_footer]
+                if override.skip_footer > 0:
+                    df = df.iloc[:-override.skip_footer]
 
-            if override.drop_regex:
-                if len(df.columns) > 0:
-                    first_col = df.columns[0]
-                    pattern = override.drop_regex
-                    df = df[~df[first_col].astype(str).str.match(pattern, na=False)]
+                if override.drop_regex:
+                    if len(df.columns) > 0:
+                        first_col = df.columns[0]
+                        pattern = override.drop_regex
+                        df = df[~df[first_col].astype(str).str.match(pattern, na=False)]
 
-            if override.column_renames:
-                df = df.rename(columns=override.column_renames)
+                if override.column_renames:
+                    df = df.rename(columns=override.column_renames)
 
-            if override.type_hints:
-                df = self._apply_type_hints(df, override.type_hints)
+                if override.type_hints:
+                    df = self._apply_type_hints(df, override.type_hints)
 
-            if override.unpivot:
-                df = self._apply_unpivot(df, override.unpivot)
+                if override.unpivot:
+                    df = self._apply_unpivot(df, override.unpivot)
 
             import hashlib
             temp_view = f"temp_{hashlib.md5(table_name.encode()).hexdigest()[:8]}"
@@ -230,17 +272,28 @@ class ExcelLoader:
         return ""
 
     def get_sheet_names(self, file: Path) -> list[str]:
+        # Check file extension
+        if file.suffix.lower() not in ['.xlsx', '.xlsm', '.xls']:
+            # Use format manager for non-Excel files
+            return self.format_manager.get_sheets(file)
+
+        # Try DuckDB first for Excel files
         try:
             result = self.conn.execute(f"""
                 SELECT sheet_name FROM st_read('{file}')
             """).fetchall()
             return [row[0] for row in result]
         except Exception:
+            # Try format manager as fallback
             try:
-                import openpyxl
-                wb = openpyxl.load_workbook(file, read_only=True, data_only=True)
-                sheets = wb.sheetnames
-                wb.close()
-                return sheets
-            except Exception as e:
-                raise RuntimeError(f"Failed to read sheet names from {file}: {e}")
+                return self.format_manager.get_sheets(file)
+            except:
+                # Final fallback to openpyxl
+                try:
+                    import openpyxl
+                    wb = openpyxl.load_workbook(file, read_only=True, data_only=True)
+                    sheets = wb.sheetnames
+                    wb.close()
+                    return sheets
+                except Exception as e:
+                    raise RuntimeError(f"Failed to read sheet names from {file}: {e}")
