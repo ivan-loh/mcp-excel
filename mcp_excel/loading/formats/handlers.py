@@ -2,10 +2,12 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 import pandas as pd
 import numpy as np
-from typing import Optional, Dict, Any, List
+from typing import Optional, List
 from dataclasses import dataclass, field
 import csv
-import re
+
+from ...exceptions import FormatDetectionError, FileError
+from ...utils import log
 
 @dataclass
 class ParseOptions:
@@ -159,17 +161,47 @@ class XLSXHandler(FormatHandler):
         return df
 
     def get_sheets(self, file_path: Path) -> List[str]:
+        errors_encountered = []
         try:
             import openpyxl
             wb = openpyxl.load_workbook(file_path, read_only=True)
             sheets = wb.sheetnames
             wb.close()
             return sheets
-        except:
-            xl_file = pd.ExcelFile(file_path, engine='openpyxl')
-            sheets = xl_file.sheet_names
-            xl_file.close()
-            return sheets
+        except PermissionError as e:
+            raise FileError(
+                f"Permission denied reading {file_path}",
+                file_path=str(file_path),
+                operation="get_sheets",
+                data={"error": str(e), "handler": "XLSXHandler"}
+            )
+        except FileNotFoundError as e:
+            raise FileError(
+                f"File not found: {file_path}",
+                file_path=str(file_path),
+                operation="get_sheets",
+                data={"error": str(e)}
+            )
+        except Exception as e:
+            errors_encountered.append(f"openpyxl: {type(e).__name__}: {str(e)}")
+            log.debug("openpyxl_failed_trying_pandas", file=str(file_path), error=str(e))
+
+            try:
+                xl_file = pd.ExcelFile(file_path, engine='openpyxl')
+                sheets = xl_file.sheet_names
+                xl_file.close()
+                log.info("pandas_fallback_success", file=str(file_path))
+                return sheets
+            except (PermissionError, FileNotFoundError):
+                raise
+            except Exception as fallback_error:
+                errors_encountered.append(f"pandas: {type(fallback_error).__name__}: {str(fallback_error)}")
+                raise FormatDetectionError(
+                    f"Failed to read sheets from {file_path.name}",
+                    file_path=str(file_path),
+                    attempted_formats=["openpyxl", "pandas"],
+                    data={"errors": errors_encountered}
+                )
 
     def validate(self, file_path: Path) -> tuple[bool, Optional[str]]:
         try:
@@ -210,7 +242,10 @@ class XLSHandler(FormatHandler):
             sheets = xl_file.sheet_names
             xl_file.close()
             return sheets
-        except:
+        except (PermissionError, FileNotFoundError):
+            raise
+        except Exception as e:
+            log.warn("xls_get_sheets_failed", file=str(file_path), error=str(e))
             return ['Sheet1']
 
     def validate(self, file_path: Path) -> tuple[bool, Optional[str]]:
@@ -245,6 +280,7 @@ class CSVHandler(FormatHandler):
             return df
         except UnicodeDecodeError:
             encodings_to_try = ['latin-1', 'windows-1252', 'iso-8859-1']
+            errors = []
             for enc in encodings_to_try:
                 try:
                     df = pd.read_csv(
@@ -258,10 +294,22 @@ class CSVHandler(FormatHandler):
                         parse_dates=options.parse_dates,
                         engine='python' if options.skip_footer > 0 else 'c'
                     )
+                    log.info("csv_encoding_fallback_success", file=str(file_path), encoding=enc)
                     return df
-                except:
+                except UnicodeDecodeError as e:
+                    errors.append(f"{enc}: UnicodeDecodeError")
+                    log.debug("csv_encoding_failed", encoding=enc, error=str(e))
                     continue
-            raise
+                except Exception as e:
+                    errors.append(f"{enc}: {type(e).__name__}: {e}")
+                    log.debug("csv_read_failed", encoding=enc, error=str(e))
+                    continue
+            raise FormatDetectionError(
+                f"Failed to read CSV with any encoding: {file_path}",
+                file_path=str(file_path),
+                attempted_formats=[f"csv[{enc}]" for enc in [encoding] + encodings_to_try],
+                data={"errors": errors}
+            )
 
     def _detect_delimiter(self, file_path: Path, encoding: str) -> str:
         try:
@@ -270,8 +318,12 @@ class CSVHandler(FormatHandler):
 
             sniffer = csv.Sniffer()
             dialect = sniffer.sniff(sample)
+            log.debug("delimiter_sniffed", delimiter=repr(dialect.delimiter))
             return dialect.delimiter
-        except:
+        except csv.Error as e:
+            log.debug("delimiter_sniff_failed", error=str(e), reason="csv_error")
+        except Exception as e:
+            log.debug("delimiter_sniff_failed", error=str(e), error_type=type(e).__name__)
             with open(file_path, 'r', encoding=encoding, errors='ignore') as f:
                 lines = f.readlines()[:10]
 

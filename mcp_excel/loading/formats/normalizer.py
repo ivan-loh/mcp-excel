@@ -3,22 +3,33 @@ import numpy as np
 from typing import Dict, Any, Optional
 import re
 
+from ...utils import log
+
 class DataNormalizer:
     def __init__(self):
         self.locale_config: Optional[Dict[str, Any]] = None
+        self.semantic_type_hints: Optional[Dict[str, str]] = None
 
     def set_locale(self, locale_config: Dict[str, Any]):
         self.locale_config = locale_config
 
-    def normalize(self, df: pd.DataFrame, options: Dict[str, Any] = None) -> pd.DataFrame:
+    def set_semantic_hints(self, hints: Dict[str, str]):
+        self.semantic_type_hints = hints
+
+    def normalize(self, df: pd.DataFrame, options: Dict[str, Any] = None, semantic_hints: Dict[str, str] = None) -> pd.DataFrame:
         if options is None:
             options = {}
+
+        if semantic_hints:
+            self.semantic_type_hints = semantic_hints
 
         df = self.clean_whitespace(df, options)
         df = self.normalize_numbers(df, options)
         df = self.normalize_dates(df, options)
         df = self.handle_missing_values(df, options)
         df = self.fix_data_types(df, options)
+
+        self.semantic_type_hints = None
 
         return df
 
@@ -116,6 +127,11 @@ class DataNormalizer:
             if isinstance(col_data, pd.DataFrame):
                 continue
 
+            if self.semantic_type_hints and col in self.semantic_type_hints:
+                hint = self.semantic_type_hints[col].upper()
+                if any(t in hint for t in ['DECIMAL', 'NUMERIC', 'INTEGER', 'FLOAT', 'VARCHAR', 'TEXT']):
+                    continue
+
             if pd.api.types.is_numeric_dtype(col_data):
                 sample = col_data.dropna()
                 if len(sample) > 0:
@@ -127,8 +143,11 @@ class DataNormalizer:
                     parsed = pd.to_datetime(col_data, errors='coerce')
                     if parsed.notna().sum() > len(col_data) * 0.5:
                         df[col] = parsed
-                except:
-                    pass
+                        log.debug("date_normalization_success", column=col)
+                except MemoryError as e:
+                    log.error("date_normalization_memory", column=col, error=str(e))
+                except Exception as e:
+                    log.warn("date_normalization_failed", column=col, error=str(e), error_type=type(e).__name__)
 
         return df
 
@@ -185,7 +204,10 @@ class DataNormalizer:
                         numeric = pd.to_numeric(non_null, errors='coerce')
                         if numeric.notna().sum() > len(non_null) * 0.9:
                             df[col] = pd.to_numeric(col_data, errors='coerce')
-                    except:
-                        pass
+                            log.debug("number_normalization_success", column=col)
+                    except MemoryError as e:
+                        log.error("number_normalization_memory", column=col, error=str(e))
+                    except Exception as e:
+                        log.warn("number_normalization_failed", column=col, error=str(e), error_type=type(e).__name__)
 
         return df

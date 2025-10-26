@@ -1,4 +1,3 @@
-import re
 from pathlib import Path
 from typing import Any, Optional
 import pandas as pd
@@ -8,7 +7,9 @@ from ..models import SheetOverride, TableMeta, MergeHandlingConfig
 from ..utils.naming import TableRegistry
 from .formats.manager import FormatManager
 from .analyzer import ExcelAnalyzer
+from .type_inference import SemanticTypeInference
 from ..utils import log
+from ..exceptions import FormatDetectionError, FileError, DataTransformError
 
 
 class ExcelLoader:
@@ -16,6 +17,7 @@ class ExcelLoader:
         self.conn = conn
         self.registry = registry
         self.format_manager = FormatManager()
+        self.type_inference = SemanticTypeInference()
         self._ensure_excel_extension()
 
     def _ensure_excel_extension(self):
@@ -188,7 +190,7 @@ class ExcelLoader:
     def _load_raw(self, file: Path, relpath: str, sheet: str, table_name: str, alias: str) -> TableMeta:
         try:
             if file.suffix.lower() not in ['.xlsx', '.xlsm']:
-                df = self.format_manager.load_file(file, sheet, {'normalize': False})
+                df = self.format_manager.load_file(file, sheet, {'normalize': False}, None)
 
                 import hashlib
                 temp_table = f"temp_{hashlib.md5(table_name.encode()).hexdigest()[:8]}"
@@ -255,7 +257,19 @@ class ExcelLoader:
                         'currency_symbols': override.locale.currency_symbols,
                         'auto_detect': override.locale.auto_detect
                     })
-                df = self.format_manager.load_file(file, sheet, options)
+
+                semantic_hints = None
+                if file.suffix.lower() in ['.xlsx', '.xlsm']:
+                    try:
+                        temp_df = self.conn.execute(f"SELECT * FROM read_xlsx('{file}', sheet='{sheet}', header=true) LIMIT 1").df()
+                        if len(temp_df.columns) > 0:
+                            semantic_hints = self.type_inference.generate_type_hints(temp_df)
+                    except MemoryError as e:
+                        log.warn("type_inference_memory_error", file=str(file), error=str(e))
+                    except Exception as e:
+                        log.warn("type_inference_failed", file=str(file), error=str(e), error_type=type(e).__name__)
+
+                df = self.format_manager.load_file(file, sheet, options, semantic_hints)
 
                 if override.drop_regex and len(df.columns) > 0:
                     first_col = df.columns[0]
@@ -267,8 +281,10 @@ class ExcelLoader:
                 if override.column_renames:
                     df = df.rename(columns=override.column_renames)
 
-                if override.type_hints:
-                    df = self._apply_type_hints(df, override.type_hints)
+                semantic_hints = self.type_inference.generate_type_hints(df)
+                merged_hints = {**semantic_hints, **(override.type_hints or {})}
+                if merged_hints:
+                    df = self._apply_type_hints(df, merged_hints)
 
                 if override.unpivot:
                     df = self._apply_unpivot(df, override.unpivot)
@@ -306,8 +322,10 @@ class ExcelLoader:
                 if override.column_renames:
                     df = df.rename(columns=override.column_renames)
 
-                if override.type_hints:
-                    df = self._apply_type_hints(df, override.type_hints)
+                semantic_hints = self.type_inference.generate_type_hints(df)
+                merged_hints = {**semantic_hints, **(override.type_hints or {})}
+                if merged_hints:
+                    df = self._apply_type_hints(df, merged_hints)
 
                 if override.unpivot:
                     df = self._apply_unpivot(df, override.unpivot)
@@ -380,12 +398,17 @@ class ExcelLoader:
             type_upper = type_hint.upper()
             integer_types = ("INT", "BIGINT", "SMALLINT")
             numeric_types = ("DECIMAL", "NUMERIC", "DOUBLE", "FLOAT")
+            text_types = ("VARCHAR", "TEXT", "STRING", "CHAR")
 
-            if any(t in type_upper for t in integer_types):
+            if any(t in type_upper for t in text_types):
+                df[col_name] = df[col_name].astype(str)
+                df[col_name] = df[col_name].replace('nan', pd.NA)
+                df[col_name] = df[col_name].replace('None', pd.NA)
+            elif any(t in type_upper for t in integer_types):
                 df[col_name] = pd.to_numeric(df[col_name], errors="coerce").astype("Int64")
             elif any(t in type_upper for t in numeric_types):
                 df[col_name] = pd.to_numeric(df[col_name], errors="coerce")
-            elif "DATE" in type_upper:
+            elif "DATE" in type_upper or "TIME" in type_upper:
                 df[col_name] = pd.to_datetime(df[col_name], errors="coerce")
             elif "BOOL" in type_upper:
                 df[col_name] = df[col_name].astype(str).str.lower().isin(["true", "1", "yes", "y"])
@@ -524,14 +547,29 @@ class ExcelLoader:
             """).fetchall()
             return [row[0] for row in result]
         except Exception:
+            errors_encountered = []
             try:
                 return self.format_manager.get_sheets(file)
-            except:
+            except (PermissionError, FileNotFoundError):
+                raise
+            except Exception as e:
+                errors_encountered.append(f"format_manager: {type(e).__name__}: {str(e)}")
+                log.debug("format_manager_get_sheets_failed", file=str(file), error=str(e))
+
                 try:
                     import openpyxl
                     wb = openpyxl.load_workbook(file, read_only=True, data_only=True)
                     sheets = wb.sheetnames
                     wb.close()
+                    log.info("openpyxl_fallback_success", file=str(file))
                     return sheets
-                except Exception as e:
-                    raise RuntimeError(f"Failed to read sheet names from {file}: {e}")
+                except (PermissionError, FileNotFoundError):
+                    raise
+                except Exception as fallback_error:
+                    errors_encountered.append(f"openpyxl: {type(fallback_error).__name__}: {str(fallback_error)}")
+                    raise FormatDetectionError(
+                        f"Failed to read sheet names from {file}",
+                        file_path=str(file),
+                        attempted_formats=["duckdb", "format_manager", "openpyxl"],
+                        data={"errors": errors_encountered}
+                    )

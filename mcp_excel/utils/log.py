@@ -24,3 +24,7 @@ def warn(event: str, **kwargs: Any):
 
 def error(event: str, **kwargs: Any):
     log("error", event, **kwargs)
+
+
+def debug(event: str, **kwargs: Any):
+    log("debug", event, **kwargs)

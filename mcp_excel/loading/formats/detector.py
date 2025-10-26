@@ -1,8 +1,10 @@
-import struct
 import zipfile
 from pathlib import Path
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
+
+from ...exceptions import FileError
+from ...utils import log
 
 @dataclass
 class FormatInfo:
@@ -102,8 +104,22 @@ class FormatDetector:
                         metadata={'files': len(filelist)}
                     )
 
-        except:
-            pass
+        except FileNotFoundError as e:
+            log.error("format_detection_file_not_found", file=str(file_path))
+            raise FileError(
+                f"File not found: {file_path}",
+                file_path=str(file_path),
+                operation="detect_format"
+            )
+        except PermissionError as e:
+            log.error("format_detection_permission_denied", file=str(file_path))
+            raise FileError(
+                f"Permission denied: {file_path}",
+                file_path=str(file_path),
+                operation="detect_format"
+            )
+        except Exception as e:
+            log.warn("format_detection_unexpected", file=str(file_path), error=str(e))
 
         return FormatInfo(format_type='unknown', confidence=0.0)
 
@@ -112,7 +128,8 @@ class FormatDetector:
             text_chars = bytes(range(32, 127)) + b'\n\r\t'
             text_ratio = sum(1 for byte in header[:1000] if byte in text_chars) / min(1000, len(header))
             return text_ratio > 0.8
-        except:
+        except Exception as e:
+            log.debug("text_detection_failed", error=str(e))
             return False
 
     def _analyze_text_format(self, file_path: Path, header: bytes) -> FormatInfo:
@@ -132,7 +149,7 @@ class FormatDetector:
                 semicolon_counts = [line.count(';') for line in lines if line]
                 if semicolon_counts and all(c == semicolon_counts[0] for c in semicolon_counts) and semicolon_counts[0] > 0:
                     return FormatInfo(format_type='csv', encoding='utf-8', confidence=0.8)
-        except:
-            pass
+        except Exception as e:
+            log.debug("text_format_analysis_failed", error=str(e))
 
         return FormatInfo(format_type='unknown', confidence=0.0)

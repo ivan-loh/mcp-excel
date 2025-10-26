@@ -18,6 +18,7 @@ from .loading.loader import ExcelLoader
 from .utils.watcher import FileWatcher
 from .utils.auth import APIKeyMiddleware, get_api_key_from_env
 from .utils import log
+from .exceptions import MCPExcelError, ExtensionError
 
 
 mcp = FastMCP("mcp-server-excel-sql")
@@ -68,8 +69,24 @@ def get_connection():
         try:
             local_conn.execute("INSTALL excel")
             local_conn.execute("LOAD excel")
-        except:
+        except duckdb.ExtensionException:
             pass
+        except duckdb.IOException as e:
+            log.error("extension_install_failed", error=str(e), reason="io_error")
+            raise ExtensionError(
+                "Failed to install DuckDB excel extension. Check disk space and permissions.",
+                extension_name="excel",
+                operation="INSTALL",
+                data={"error": str(e)}
+            )
+        except Exception as e:
+            log.error("extension_install_unexpected", error=str(e), error_type=type(e).__name__)
+            raise ExtensionError(
+                f"Unexpected error installing excel extension: {e}",
+                extension_name="excel",
+                operation="INSTALL",
+                data={"error_type": type(e).__name__}
+            )
         try:
             yield local_conn
         finally:
@@ -210,8 +227,10 @@ def _register_dataframe_view(conn, temp_table_name: str, view_name: str, datafra
 
     try:
         conn.unregister(temp_table_name)
-    except:
-        pass
+    except duckdb.CatalogException:
+        log.debug("temp_table_not_found", table=temp_table_name)
+    except Exception as e:
+        log.warn("temp_table_cleanup_failed", table=temp_table_name, error=str(e))
 
     conn.register(temp_table_name, dataframe)
     conn.execute(f'CREATE OR REPLACE VIEW "{view_name}" AS SELECT * FROM {temp_table_name}')
@@ -405,6 +424,8 @@ def query(
                 try:
                     conn.execute("ROLLBACK")
                     log.info("transaction_rolled_back", reason="cleanup")
+                except duckdb.TransactionException as rollback_error:
+                    log.debug("rollback_already_done", error=str(rollback_error))
                 except Exception as rollback_error:
                     log.warn("rollback_failed", error=str(rollback_error))
 
@@ -449,7 +470,14 @@ def list_tables(alias: str = None) -> dict:
                 try:
                     row_count_result = conn.execute(f'SELECT COUNT(*) FROM "{view_name}"').fetchone()
                     est_rows = row_count_result[0] if row_count_result else 0
-                except:
+                except duckdb.CatalogException as e:
+                    log.debug("view_count_catalog_error", view=view_name, error=str(e))
+                    est_rows = 0
+                except duckdb.BinderException as e:
+                    log.warn("view_count_binder_error", view=view_name, error=str(e))
+                    est_rows = 0
+                except Exception as e:
+                    log.error("view_count_unexpected", view=view_name, error=str(e))
                     est_rows = 0
 
             sql_preview = view_info["sql"][:100]
