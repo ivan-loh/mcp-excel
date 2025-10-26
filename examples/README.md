@@ -28,14 +28,14 @@ Real-world financial data for **Kopitiam Kita Sdn Bhd**, a Malaysian coffeehouse
 ## Generate Examples
 
 ```bash
-python examples/create_finance_examples.py
+python examples/finance/create_finance_examples.py
 ```
 
 ## Usage
 
 ```bash
 # Load with proper headers and type hints
-uvx --from mcp-server-excel-sql mcp-excel --path examples --overrides examples/finance_overrides.yaml --watch
+uvx --from mcp-server-excel-sql mcp-excel --path examples/finance --overrides examples/finance/finance_overrides.yaml --watch
 ```
 
 ## Prompt Chain Sequences

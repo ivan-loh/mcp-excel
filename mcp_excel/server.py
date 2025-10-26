@@ -28,10 +28,12 @@ registry: Optional[TableRegistry]         = None
 loader: Optional[ExcelLoader]             = None
 load_configs: dict[str, LoadConfig]       = {}
 watcher: Optional[FileWatcher]            = None
+views: dict[str, dict]                    = {}
 
 _catalog_lock           = threading.RLock()
 _load_configs_lock      = threading.RLock()
 _registry_lock          = threading.RLock()
+_views_lock             = threading.RLock()
 _db_path: Optional[str] = None
 _use_http_mode          = False
 
@@ -98,6 +100,56 @@ def _generate_alias_from_path(root: Path) -> str:
     alias = alias.strip("_")
 
     return alias if alias else "excel"
+
+
+def _get_view_file_path(root: Path, view_name: str) -> Path:
+    return root / f".view_{view_name}"
+
+
+def _validate_view_name(view_name: str) -> None:
+    if not view_name:
+        raise ValueError("View name cannot be empty")
+
+    if "." in view_name:
+        raise ValueError("View names cannot contain dots (reserved for system tables)")
+
+    if view_name.startswith("_"):
+        raise ValueError("View names cannot start with underscore (reserved)")
+
+    if not re.match(r"^[a-z0-9_]+$", view_name, re.IGNORECASE):
+        raise ValueError("View names can only contain letters, numbers, and underscores")
+
+
+def _load_views_from_disk(root: Path) -> int:
+    loaded_count = 0
+
+    for view_file in root.glob(".view_*"):
+        view_name = view_file.name[6:]
+
+        try:
+            sql = view_file.read_text().strip()
+
+            if not sql:
+                log.warn("view_file_empty", view=view_name, file=str(view_file))
+                continue
+
+            with get_connection() as conn:
+                conn.execute(f'CREATE OR REPLACE VIEW "{view_name}" AS {sql}')
+
+            with _views_lock:
+                views[view_name] = {
+                    "sql": sql,
+                    "file": str(view_file),
+                    "created_at": view_file.stat().st_mtime
+                }
+
+            loaded_count += 1
+            log.info("view_loaded", view=view_name, file=str(view_file))
+
+        except Exception as e:
+            log.warn("view_load_failed", view=view_name, file=str(view_file), error=str(e))
+
+    return loaded_count
 
 
 def _parse_sheet_override(override_dict: dict) -> SheetOverride:
@@ -250,18 +302,19 @@ def load_dir(
                         if sheet_override_dict:
                             sheet_override = _parse_sheet_override(sheet_override_dict)
 
-                        table_meta = loader.load_sheet(file_path, relative_path,
+                        table_metas = loader.load_sheet(file_path, relative_path,
                                                        sheet_name, alias, sheet_override)
 
-                        with _catalog_lock:
-                            catalog[table_meta.table_name] = table_meta
+                        for table_meta in table_metas:
+                            with _catalog_lock:
+                                catalog[table_meta.table_name] = table_meta
 
-                        sheets_loaded += 1
-                        total_rows += table_meta.est_rows
+                            sheets_loaded += 1
+                            total_rows += table_meta.est_rows
 
-                        log.info("table_created", table=table_meta.table_name,
-                                file=relative_path, sheet=sheet_name,
-                                rows=table_meta.est_rows, mode=table_meta.mode)
+                            log.info("table_created", table=table_meta.table_name,
+                                    file=relative_path, sheet=sheet_name,
+                                    rows=table_meta.est_rows, mode=table_meta.mode)
 
                     files_loaded += 1
 
@@ -272,6 +325,8 @@ def load_dir(
 
     _create_system_views(alias)
 
+    views_loaded = _load_views_from_disk(root)
+
     with _catalog_lock:
         tables_count = len([t for t in catalog if t.startswith(f"{alias}.")])
 
@@ -281,6 +336,7 @@ def load_dir(
         "files_count": files_loaded,
         "sheets_count": sheets_loaded,
         "tables_count": tables_count,
+        "views_count": views_loaded,
         "rows_estimate": total_rows,
         "cache_mode": "none",
         "materialized": False,
@@ -378,6 +434,7 @@ def list_tables(alias: str = None) -> dict:
 
             tables.append({
                 "table": table_name,
+                "source": "file",
                 "file": table_meta.file,
                 "relpath": table_meta.relpath,
                 "sheet": table_meta.sheet,
@@ -385,13 +442,42 @@ def list_tables(alias: str = None) -> dict:
                 "est_rows": table_meta.est_rows,
             })
 
-    return {"tables": tables}
+    view_list = []
+    with _views_lock:
+        for view_name, view_info in views.items():
+            with get_connection() as conn:
+                try:
+                    row_count_result = conn.execute(f'SELECT COUNT(*) FROM "{view_name}"').fetchone()
+                    est_rows = row_count_result[0] if row_count_result else 0
+                except:
+                    est_rows = 0
+
+            sql_preview = view_info["sql"][:100]
+            if len(view_info["sql"]) > 100:
+                sql_preview += "..."
+
+            view_list.append({
+                "name": view_name,
+                "source": "view",
+                "sql": sql_preview,
+                "est_rows": est_rows,
+                "file": view_info["file"]
+            })
+
+    return {
+        "tables": tables,
+        "views": view_list
+    }
 
 
 def get_schema(table_name: str) -> dict:
+    is_view = False
     with _catalog_lock:
         if table_name not in catalog:
-            raise ValueError(f"Table {table_name} not found")
+            with _views_lock:
+                if table_name not in views:
+                    raise ValueError(f"Table or view '{table_name}' not found")
+                is_view = True
 
     with get_connection() as conn:
         try:
@@ -403,7 +489,9 @@ def get_schema(table_name: str) -> dict:
         except Exception as e:
             with _catalog_lock:
                 if table_name not in catalog:
-                    raise ValueError(f"Table {table_name} not found (removed during request)")
+                    with _views_lock:
+                        if table_name not in views:
+                            raise ValueError(f"Table or view '{table_name}' not found (removed during request)")
             raise RuntimeError(f"Failed to get schema: {e}")
 
     return {"columns": columns}
@@ -511,12 +599,13 @@ def _refresh_incremental(alias: str) -> dict:
                     sheet_override = SheetOverride(**sheet_override_dict)
 
                 conn.execute(f'DROP VIEW IF EXISTS "{table_name}"')
-                new_meta = loader.load_sheet(file_path, relative_path,
+                new_metas = loader.load_sheet(file_path, relative_path,
                                             table_meta.sheet, load_config.alias,
                                             sheet_override)
 
-                with _catalog_lock:
-                    catalog[table_name] = new_meta
+                for new_meta in new_metas:
+                    with _catalog_lock:
+                        catalog[new_meta.table_name] = new_meta
 
                 changed_count += 1
 
@@ -538,6 +627,85 @@ def refresh(alias: str = None, full: bool = False) -> dict:
         return _refresh_full(alias)
     else:
         return _refresh_incremental(alias)
+
+
+def create_view(view_name: str, sql: str) -> dict:
+    _validate_view_name(view_name)
+
+    with _catalog_lock:
+        if view_name in catalog:
+            raise ValueError(f"Name '{view_name}' conflicts with existing table")
+
+    with _views_lock:
+        if view_name in views:
+            raise ValueError(f"View '{view_name}' already exists")
+
+    with _load_configs_lock:
+        if not load_configs:
+            raise RuntimeError("No data loaded. Call load_dir first.")
+
+        root_path = list(load_configs.values())[0].root
+
+    sql_clean = sql.strip()
+    if not sql_clean.upper().startswith("SELECT"):
+        raise ValueError("View SQL must be a SELECT query")
+
+    with get_connection() as conn:
+        try:
+            conn.execute(f'CREATE OR REPLACE VIEW "{view_name}" AS {sql_clean}')
+
+            row_count_result = conn.execute(f'SELECT COUNT(*) FROM "{view_name}"').fetchone()
+            est_rows = row_count_result[0] if row_count_result else 0
+
+        except Exception as e:
+            raise RuntimeError(f"Failed to create view: {e}")
+
+    view_file = _get_view_file_path(root_path, view_name)
+    view_file.write_text(sql_clean)
+
+    with _views_lock:
+        views[view_name] = {
+            "sql": sql_clean,
+            "file": str(view_file),
+            "created_at": view_file.stat().st_mtime
+        }
+
+    log.info("view_created", view=view_name, file=str(view_file), rows=est_rows)
+
+    return {
+        "view_name": view_name,
+        "est_rows": est_rows,
+        "file": str(view_file),
+        "created": True
+    }
+
+
+def drop_view(view_name: str) -> dict:
+    with _views_lock:
+        if view_name not in views:
+            raise ValueError(f"View '{view_name}' does not exist")
+
+        view_info = views[view_name]
+        view_file = Path(view_info["file"])
+
+    with get_connection() as conn:
+        try:
+            conn.execute(f'DROP VIEW IF EXISTS "{view_name}"')
+        except Exception as e:
+            log.warn("view_drop_failed_in_db", view=view_name, error=str(e))
+
+    if view_file.exists():
+        view_file.unlink()
+
+    with _views_lock:
+        del views[view_name]
+
+    log.info("view_dropped", view=view_name, file=str(view_file))
+
+    return {
+        "view_name": view_name,
+        "dropped": True
+    }
 
 
 def _on_file_change():
@@ -579,21 +747,24 @@ def stop_watching():
 @mcp.tool()
 def tool_query(sql: str, max_rows: int = 10000, timeout_ms: int = 60000) -> dict:
     """
-    Execute read-only SQL query against loaded Excel tables.
+    Execute read-only SQL query against tables/views. Call tool_list_tables first.
 
-    CRITICAL: Table names contain dots and MUST use double quotes.
-    Correct: SELECT * FROM "examples.sales.summary"
-    Wrong: SELECT * FROM examples.sales.summary
-
-    SQL dialect: DuckDB (supports CTEs, window functions, JSON)
-    Security: Read-only (INSERT/UPDATE/DELETE/CREATE/DROP blocked)
+    Table names need quotes: SELECT * FROM "examples.sales.summary"
+    View names don't: SELECT * FROM high_value_sales
 
     Parameters:
-    - sql: SQL query
-    - max_rows: Row limit (default: 10000)
-    - timeout_ms: Timeout in milliseconds (default: 60000)
+    - sql: SELECT query (DuckDB with CTEs, window functions)
+    - max_rows: Return limit, default 10000
+    - timeout_ms: Query timeout, default 60000
 
-    Returns: {columns, rows, row_count, truncated, execution_ms}
+    Returns:
+    - columns: [{name, type}] - Column definitions
+    - rows: [[]] - Results (capped at max_rows)
+    - row_count: Number of rows returned
+    - truncated: true if more rows exist beyond limit
+    - execution_ms: Query duration
+
+    Read-only security enforced.
     """
     return query(sql, max_rows, timeout_ms)
 
@@ -601,15 +772,21 @@ def tool_query(sql: str, max_rows: int = 10000, timeout_ms: int = 60000) -> dict
 @mcp.tool()
 def tool_list_tables(alias: str = None) -> dict:
     """
-    Discover available Excel tables. Call this first to see what data is loaded.
+    Discover loaded tables and views. CALL FIRST.
 
-    Tables are named: <alias>.<filename>.<sheet> (lowercase, sanitized)
-    Use the exact table name from results in subsequent queries.
+    Tables: <alias>.<filename>.<sheet> (lowercase)
+    Views: <view_name> (no dots)
 
-    Optional parameter:
-    - alias: Filter to specific namespace (e.g., "examples" shows only "examples.*")
+    Parameters:
+    - alias: Optional namespace filter (e.g., "examples")
 
-    Returns: [{table, file, relpath, sheet, mode, est_rows}]
+    Returns:
+    - tables: [{table, source, file, relpath, sheet, mode, est_rows}]
+      - mode: "RAW" (unprocessed) or "ASSISTED" (YAML transforms)
+    - views: [{name, source, sql, est_rows, file}]
+      - sql: View definition preview (truncated at 100 chars)
+
+    Use exact names in tool_query/tool_get_schema.
     """
     return list_tables(alias)
 
@@ -617,12 +794,12 @@ def tool_list_tables(alias: str = None) -> dict:
 @mcp.tool()
 def tool_get_schema(table: str) -> dict:
     """
-    Get column names and types for a table.
+    Get column names and types for a table or view.
 
-    Call this after tool_list_tables to inspect structure before querying.
+    Call after tool_list_tables to inspect structure.
 
     Parameters:
-    - table: Exact table name from tool_list_tables
+    - table: Exact name from tool_list_tables
 
     Returns: {columns: [{name, type, nullable}]}
     """
@@ -635,14 +812,48 @@ def tool_refresh(alias: str = None, full: bool = False) -> dict:
     Reload tables from modified Excel files.
 
     Parameters:
-    - alias: Refresh specific namespace or None for all
-    - full: false = incremental (mtime check, fast), true = drop/reload all (slow)
+    - alias: Namespace to refresh or None for all
+    - full: false (default) = incremental, true = full rebuild
 
-    Use when Excel files change and auto-watch is disabled.
+    Returns when full=false: {changed, total}
+    Returns when full=true: {files_count, sheets_count, dropped, added}
 
-    Returns: {changed, total} (incremental) or {files_count, sheets_count, dropped, added} (full)
+    Views persist independently and auto-reference updated tables.
     """
     return refresh(alias, full)
+
+
+@mcp.tool()
+def tool_create_view(view_name: str, sql: str) -> dict:
+    """
+    Create persistent view from SELECT query.
+
+    Views stored as .view_{name} files, auto-restored on restart.
+    Replaces existing view (CREATE OR REPLACE).
+
+    Parameters:
+    - view_name: Alphanumeric and underscores only (no dots, no leading underscore)
+    - sql: SELECT query only
+
+    Returns: {view_name, est_rows, file, created}
+
+    Valid names: "high_value_sales", "monthly_totals"
+    Invalid: "sales.data" (dots), "_private" (underscore prefix)
+    """
+    return create_view(view_name, sql)
+
+
+@mcp.tool()
+def tool_drop_view(view_name: str) -> dict:
+    """
+    Delete view permanently. Cannot be undone.
+
+    Parameters:
+    - view_name: Name of view to delete
+
+    Returns: {view_name, dropped}
+    """
+    return drop_view(view_name)
 
 
 @click.command()

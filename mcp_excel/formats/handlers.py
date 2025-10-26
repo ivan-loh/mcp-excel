@@ -18,9 +18,11 @@ class ParseOptions:
     chunk_size: Optional[int] = None
     data_only: bool = True
     preserve_formatting: bool = False
-    handle_merged_cells: str = 'unmerge'
-    ignore_hidden: bool = True
+    handle_merged_cells: str = 'fill'
+    ignore_hidden: bool = False
     max_rows: Optional[int] = None
+    merge_strategy: str = 'fill'
+    range: Optional[str] = None
 
 class FormatHandler(ABC):
     @abstractmethod
@@ -47,7 +49,6 @@ class XLSXHandler(FormatHandler):
         try:
             import openpyxl
         except ImportError:
-            # Fall back to pandas
             return pd.read_excel(
                 file_path,
                 sheet_name=sheet,
@@ -57,18 +58,43 @@ class XLSXHandler(FormatHandler):
                 engine='openpyxl'
             )
 
+        read_only = options.merge_strategy == 'skip'
         wb = openpyxl.load_workbook(
             file_path,
-            read_only=True,
+            read_only=read_only,
             data_only=options.data_only,
             keep_links=False
         )
 
         ws = wb[sheet] if sheet else wb.active
 
+        if options.merge_strategy != 'skip' and not read_only:
+            ws = self._handle_merged_cells(ws, options.merge_strategy)
+
         data = []
-        for row in ws.iter_rows(values_only=True):
-            data.append(list(row))
+
+        if options.range:
+            rows_iter = ws[options.range]
+            if not isinstance(rows_iter[0], tuple):
+                rows_iter = [rows_iter]
+
+            for row in rows_iter:
+                if not isinstance(row, tuple):
+                    row = [row]
+                row_values = [cell.value for cell in row]
+                data.append(row_values)
+        else:
+            for row_idx, row in enumerate(ws.iter_rows(values_only=False), start=1):
+                if options.ignore_hidden and hasattr(ws.row_dimensions[row_idx], 'hidden') and ws.row_dimensions[row_idx].hidden:
+                    continue
+
+                row_values = []
+                for cell in row:
+                    if options.ignore_hidden and hasattr(ws.column_dimensions[cell.column_letter], 'hidden') and ws.column_dimensions[cell.column_letter].hidden:
+                        continue
+                    row_values.append(cell.value)
+
+                data.append(row_values)
 
         wb.close()
 
@@ -109,11 +135,30 @@ class XLSXHandler(FormatHandler):
 
         return df
 
+    def _handle_merged_cells(self, ws, strategy: str):
+        import openpyxl
+
+        merged_ranges = list(ws.merged_cells.ranges)
+
+        for merged_range in merged_ranges:
+            top_left_value = ws.cell(
+                merged_range.min_row,
+                merged_range.min_col
+            ).value
+
+            ws.unmerge_cells(str(merged_range))
+
+            if strategy == 'fill':
+                for row in range(merged_range.min_row, merged_range.max_row + 1):
+                    for col in range(merged_range.min_col, merged_range.max_col + 1):
+                        ws.cell(row, col).value = top_left_value
+
+        return ws
+
     def _clean_excel_data(self, df: pd.DataFrame, options: ParseOptions) -> pd.DataFrame:
         excel_errors = ['#DIV/0!', '#N/A', '#NAME?', '#NULL!', '#NUM!', '#REF!', '#VALUE!']
         df = df.replace(excel_errors, np.nan)
 
-        # Handle NA values
         if options.na_values:
             df = df.replace(options.na_values, np.nan)
 
@@ -190,14 +235,13 @@ class CSVHandler(FormatHandler):
         return format_type in ['csv', 'tsv']
 
     def parse(self, file_path: Path, sheet: Optional[str], options: ParseOptions) -> pd.DataFrame:
-        # Detect delimiter
-        delimiter = self._detect_delimiter(file_path, options.encoding)
+        encoding = self._detect_encoding(file_path) if options.encoding == 'utf-8' else options.encoding
+        delimiter = self._detect_delimiter(file_path, encoding)
 
-        # Parse with pandas
         try:
             df = pd.read_csv(
                 file_path,
-                encoding=options.encoding,
+                encoding=encoding,
                 delimiter=delimiter,
                 skiprows=options.skip_rows,
                 skipfooter=options.skip_footer,
@@ -208,20 +252,25 @@ class CSVHandler(FormatHandler):
                 engine='python' if options.skip_footer > 0 else 'c'
             )
             return df
-        except Exception as e:
-            # Try with different encoding
-            try:
-                df = pd.read_csv(
-                    file_path,
-                    encoding='latin-1',
-                    delimiter=delimiter,
-                    skiprows=options.skip_rows,
-                    na_values=options.na_values,
-                    error_bad_lines=False
-                )
-                return df
-            except:
-                raise e
+        except UnicodeDecodeError:
+            encodings_to_try = ['latin-1', 'windows-1252', 'iso-8859-1']
+            for enc in encodings_to_try:
+                try:
+                    df = pd.read_csv(
+                        file_path,
+                        encoding=enc,
+                        delimiter=delimiter,
+                        skiprows=options.skip_rows,
+                        skipfooter=options.skip_footer,
+                        nrows=options.max_rows,
+                        na_values=options.na_values or ['', 'NA', 'N/A', 'null', 'NULL', '#N/A'],
+                        parse_dates=options.parse_dates,
+                        engine='python' if options.skip_footer > 0 else 'c'
+                    )
+                    return df
+                except:
+                    continue
+            raise
 
     def _detect_delimiter(self, file_path: Path, encoding: str) -> str:
         try:
@@ -251,12 +300,37 @@ class CSVHandler(FormatHandler):
 
             return ','
 
+    def _detect_encoding(self, file_path: Path) -> str:
+        with open(file_path, 'rb') as f:
+            raw_data = f.read(10000)
+
+        if raw_data.startswith(b'\xef\xbb\xbf'):
+            return 'utf-8-sig'
+
+        if raw_data.startswith(b'\xff\xfe') or raw_data.startswith(b'\xfe\xff'):
+            return 'utf-16'
+
+        try:
+            raw_data.decode('utf-8')
+            return 'utf-8'
+        except UnicodeDecodeError:
+            pass
+
+        try:
+            raw_data.decode('latin-1')
+            return 'latin-1'
+        except UnicodeDecodeError:
+            pass
+
+        return 'windows-1252'
+
     def get_sheets(self, file_path: Path) -> List[str]:
         return ['Sheet1']
 
     def validate(self, file_path: Path) -> tuple[bool, Optional[str]]:
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            encoding = self._detect_encoding(file_path)
+            with open(file_path, 'r', encoding=encoding, errors='ignore') as f:
                 f.read(1024)
             return True, None
         except Exception as e:

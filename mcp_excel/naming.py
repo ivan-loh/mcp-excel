@@ -19,7 +19,9 @@ class TableRegistry:
     def _build_and_sanitize(self, alias: str, relpath: str, sheet: str, region_id: int) -> str:
         relpath_no_ext = relpath.rsplit(".", 1)[0] if "." in relpath else relpath
 
-        parts = [alias, relpath_no_ext, sheet]
+        relpath_components = relpath_no_ext.replace("\\", "/").split("/")
+
+        parts = [alias] + relpath_components + [sheet]
         if region_id > 0:
             parts.append(f"r{region_id}")
 

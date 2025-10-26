@@ -134,6 +134,11 @@ class FormatDetector:
                 comma_counts = [line.count(',') for line in lines if line]
                 if comma_counts and all(c == comma_counts[0] for c in comma_counts) and comma_counts[0] > 0:
                     return FormatInfo(format_type='csv', encoding='utf-8', confidence=0.8)
+
+                # Check for semicolon delimiter
+                semicolon_counts = [line.count(';') for line in lines if line]
+                if semicolon_counts and all(c == semicolon_counts[0] for c in semicolon_counts) and semicolon_counts[0] > 0:
+                    return FormatInfo(format_type='csv', encoding='utf-8', confidence=0.8)
         except:
             pass
 

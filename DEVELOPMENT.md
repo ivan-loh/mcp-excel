@@ -14,9 +14,11 @@ Technical documentation for developers, DevOps, and system administrators deploy
 
 ### Overview
 
-The server provides SQL access to Excel files through two modes:
+The server provides SQL access to Excel and CSV files through two modes:
 - **STDIO mode**: Single-threaded, in-memory, for local use (Claude Desktop)
 - **HTTP/SSE mode**: Multi-threaded, persistent file, for concurrent users
+
+Supported formats: xlsx, xlsm, xls, csv, tsv
 
 Key design philosophy: Simplicity and isolation over performance optimization.
 
@@ -34,15 +36,15 @@ graph TD
     HttpPath --> CoreComponents
 
     CoreComponents[Core Components Initialized] --> Registry[TableRegistry<br>naming.py]
-    CoreComponents --> LoaderComp[ExcelLoader<br>loader.py]
+    CoreComponents --> LoaderComp[ExcelLoader<br>loader.py + formats/]
 
     Main --> ParseOverrides{YAML<br>overrides<br>provided?}
     ParseOverrides -->|Yes| Overrides[SheetOverride configs<br>Skip rows, type hints, etc]
     ParseOverrides -->|No| LoadDir
     Overrides --> LoadDir
 
-    LoadDir[load_dir<br>Scan *.xlsx files] --> Excel[(Excel Files)]
-    Excel --> LoadSheet[ExcelLoader.load_sheet<br>Per sheet processing]
+    LoadDir[load_dir<br>Scan xlsx/xls/csv/tsv files] --> Files[(Excel/CSV Files)]
+    Files --> LoadSheet[ExcelLoader.load_sheet<br>FormatManager for non-Excel<br>Per sheet/file processing]
     LoadSheet --> DuckDB[(DuckDB Views<br>One view per sheet)]
     LoadSheet --> CatalogUpdate[Update Catalog<br>TableMeta storage]
     CatalogUpdate --> Locks{Thread Safety}
@@ -59,22 +61,29 @@ graph TD
     AuthFlag -->|No or STDIO| StartMCP
     Auth --> StartMCP
 
-    StartMCP[FastMCP Server Running] --> Tools[4 MCP Tools Exposed]
+    StartMCP[FastMCP Server Running] --> Tools[6 MCP Tools Exposed]
 
     Tools --> ToolQuery[tool_query<br>Execute SQL queries]
-    Tools --> ToolList[tool_list_tables<br>Discover tables]
+    Tools --> ToolList[tool_list_tables<br>Discover tables & views]
     Tools --> ToolSchema[tool_get_schema<br>Column metadata]
     Tools --> ToolRefresh[tool_refresh<br>Reload data]
+    Tools --> ToolCreateView[tool_create_view<br>Create persistent views]
+    Tools --> ToolDropView[tool_drop_view<br>Delete views]
 
     ToolQuery --> QueryFunc[query function<br>Read-only transaction<br>Timeout + row limits]
-    ToolList --> ListFunc[list_tables function<br>Return catalog entries]
-    ToolSchema --> SchemaFunc[get_schema function<br>DESCRIBE table]
+    ToolList --> ListFunc[list_tables function<br>Return catalog + views]
+    ToolSchema --> SchemaFunc[get_schema function<br>DESCRIBE table/view]
     ToolRefresh --> RefreshFunc[refresh function<br>Incremental or full]
+    ToolCreateView --> CreateViewFunc[create_view function<br>Validate & persist]
+    ToolDropView --> DropViewFunc[drop_view function<br>Remove & delete file]
 
     QueryFunc --> ConnMgmt{get_connection}
     ListFunc --> CatalogRead[Read from catalog dict]
+    ListFunc --> ViewRead[Read from views dict]
     SchemaFunc --> ConnMgmt
     RefreshFunc --> LoadSheet
+    CreateViewFunc --> ViewStore[Store to .view_* file]
+    DropViewFunc --> ViewDelete[Delete .view_* file]
 
     ConnMgmt -->|STDIO| SharedConn[Shared :memory: conn]
     ConnMgmt -->|HTTP| IsolatedConn[New connection per request<br>Timeout isolation]
@@ -97,8 +106,8 @@ graph TD
 
     class Start,Main,Client entry
     class Init,CoreComponents,Registry,LoaderComp,StartMCP,Tools core
-    class Excel,DuckDB,CatalogUpdate,CatalogRead,Results storage
-    class ToolQuery,ToolList,ToolSchema,ToolRefresh,QueryFunc,ListFunc,SchemaFunc,RefreshFunc tool
+    class Files,DuckDB,CatalogUpdate,CatalogRead,ViewRead,ViewStore,ViewDelete,Results storage
+    class ToolQuery,ToolList,ToolSchema,ToolRefresh,ToolCreateView,ToolDropView,QueryFunc,ListFunc,SchemaFunc,RefreshFunc,CreateViewFunc,DropViewFunc tool
     class FileWatcher,Auth,WatchFlag,AuthFlag optional
     class Locks,CatalogLock,ConfigLock safety
 ```
@@ -151,6 +160,164 @@ def get_connection():
     finally:
         local_conn.close()
 ```
+
+### Structure Analyzer
+
+**Component**: `mcp_excel/structure_analyzer.py` (461 lines)
+
+**Purpose**: Automatic detection of Excel file structure for handling messy, real-world files without manual configuration.
+
+#### What It Detects
+
+The `ExcelAnalyzer` class provides automatic analysis of:
+
+1. **Merged cells**: Detects merged ranges and their boundaries
+2. **Hidden rows/columns**: Identifies rows/columns marked as hidden
+3. **Data regions**: Locates actual data start/end (row/col)
+4. **Header rows**: Detects header rows with confidence scoring
+5. **Metadata rows**: Finds title rows and notes before data
+6. **Number locales**: Auto-detects European (1.234,56) vs US (1,234.56) formats
+7. **Multiple tables**: Discovers multiple tables on a single sheet (separated by 2+ blank rows)
+8. **Blank row patterns**: Maps blank row locations for table separation
+
+#### When Used
+
+Only activated when `auto_detect: true` in YAML configuration. Optional feature.
+
+**Workflow**:
+```python
+# In loader.py
+if override and override.auto_detect and file.suffix.lower() in ['.xlsx', '.xlsm']:
+    analyzer = ExcelAnalyzer()
+    structure_info = analyzer.analyze_structure(file, sheet)
+
+    # Merge auto-detected info with user overrides
+    effective_override = self._merge_override_with_detection(override, structure_info)
+```
+
+#### Caching Strategy
+
+**Cache key**: `file_path:sheet_name:mtime`
+
+**Benefits**:
+- Avoid re-analyzing unchanged files
+- Fast reloads on file watch/refresh
+- Minimal memory footprint (metadata only)
+
+**Invalidation**: Automatic on file modification (mtime change)
+
+**Implementation**:
+```python
+def analyze_structure(self, file_path: Path, sheet: str) -> StructureInfo:
+    mtime = file_path.stat().st_mtime
+    cache_key = f"{file_path}:{sheet}:{mtime}"
+
+    if cache_key in self._cache:
+        return self._cache[cache_key]
+
+    # Perform analysis...
+    structure_info = StructureInfo(...)
+    self._cache[cache_key] = structure_info
+    return structure_info
+```
+
+#### Multi-Table Detection Algorithm
+
+**Goal**: Find multiple separate tables on a single sheet
+
+**Strategy**:
+1. Detect blank rows across data region
+2. Group consecutive blank rows
+3. Consider 2+ consecutive blank rows as table separators
+4. Split data region into sections
+5. For each section, detect header row
+6. Calculate table boundaries and confidence scores
+
+**Example**:
+```
+Row 1: [Table 1 Header]
+Row 2-10: [Table 1 Data]
+Row 11-12: [Blank rows]
+Row 13: [Table 2 Header]
+Row 14-20: [Table 2 Data]
+```
+
+Result: 2 separate DuckDB views named `{alias}.{file}.{sheet}_table0` and `_table1`
+
+#### Performance Characteristics
+
+**Analysis time**:
+- Typical file (< 1MB): < 100ms
+- Large file (10MB): < 500ms
+- Cached lookup: < 1ms
+
+**Memory usage**:
+- Per-file cache: ~1-5 KB (metadata only)
+- Analysis working set: ~10-50 MB (openpyxl loading)
+
+**Limitation**: Analysis requires `read_only=False` mode in openpyxl (merged cell access)
+
+#### Error Handling
+
+**Graceful degradation**:
+```python
+try:
+    structure_info = analyzer.analyze_structure(file, sheet)
+except Exception as e:
+    log.warn("structure_analysis_failed", file=file, sheet=sheet, error=e)
+    # Fallback to manual configuration or RAW mode
+```
+
+**No analysis failures block data loading** - always falls back to user config or RAW mode.
+
+### View Management
+
+**Component**: `mcp_excel/server.py` (view management functions)
+
+**Purpose**: Persistent SQL views that survive server restarts, enabling reusable complex queries and transformations.
+
+#### Features
+
+**Persistence Strategy**:
+- Views stored as `.view_{name}` files in root directory
+- Plain SQL format for git-friendliness and portability
+- Automatic restoration on server startup
+- File mtime provides created timestamp
+
+**Implementation**:
+```python
+# View creation with validation
+def create_view(view_name: str, sql: str) -> dict:
+    # Name validation (no dots, no underscores prefix)
+    # SQL validation (must be SELECT query)
+    # Execute CREATE OR REPLACE VIEW
+    # Persist to .view_{name} file
+    # Thread-safe with _views_lock
+
+# View deletion
+def drop_view(view_name: str) -> dict:
+    # Remove from DuckDB
+    # Delete .view_{name} file
+    # Thread-safe with _views_lock
+```
+
+**Use Cases**:
+1. **Filtering**: Pre-filter large datasets for specific criteria
+2. **Aggregation**: Create summary views for dashboards
+3. **Joins**: Combine multiple tables once, query repeatedly
+4. **Derived Views**: Views that reference other views
+
+**Thread Safety**:
+- Separate `_views_lock` (RLock) for view operations
+- View catalog stored in `views` dict with metadata
+- Isolated from table catalog to prevent conflicts
+
+**Integration with Tools**:
+- `tool_list_tables()` returns both tables and views
+- `tool_get_schema()` works on views
+- `tool_query()` can query views like tables
+- `tool_create_view()` creates persistent views
+- `tool_drop_view()` removes views
 
 ### Design Decisions
 
@@ -507,12 +674,13 @@ python -m mcp_excel.server --path examples
 
 ### Testing
 
-**Test coverage: 75/75 tests passing**
-- 12 unit tests (naming, loading, type hints)
-- 47 integration tests (multi-file loading, querying, safety, refresh)
+**Test coverage: 240 tests**
+- 153 unit tests (naming, loading, multi-table, format handling, auth, drop conditions, performance, validation)
+- 54 integration tests (server workflows, examples, watcher, transport, golden path, view management)
 - 10 regression tests (bug fixes, edge cases)
-- 6 concurrency tests (parallel queries, timeout isolation, refresh safety)
+- 6 concurrency tests (thread safety, parallel queries)
 - 4 stress tests (100+ concurrent operations, memory leak detection)
+- 13 view management tests (view creation, persistence, queries)
 
 **Running tests:**
 ```bash
@@ -529,14 +697,14 @@ pytest -m concurrency
 pytest -m stress
 
 # Run specific test file
-pytest tests/test_concurrency.py -v
+pytest tests/test_multi_table.py -v
 ```
 
 **Writing new tests:**
 - All code changes must include tests
-- Maintain 75/75 passing tests
 - Add concurrency tests for shared state changes
 - Use fixtures from `conftest.py`
+- See tests/README.md for detailed test organization
 
 **Key test scenarios:**
 - Parallel queries don't interfere
@@ -584,7 +752,7 @@ mcp-excel --help
 
 **Common causes:**
 - File permissions (server process cannot read files)
-- Unsupported Excel format (use `.xlsx`, not `.xls`)
+- Unsupported file format (supported: xlsx, xlsm, xls, csv, tsv)
 - Corrupted file
 - File path outside `--path` directory
 
@@ -726,20 +894,31 @@ pytest tests/test_stress_concurrency.py::test_stress_no_memory_leaks
 
 ```
 tests/
-├── test_auth.py              # API key authentication
-├── test_concurrency.py       # Thread safety, isolation
-├── test_examples.py          # Finance examples validation
-├── test_integration.py       # Multi-file loading, querying
-├── test_issue_fixes.py       # Regression tests
-├── test_loader.py            # Excel loading, transformations
-├── test_naming.py            # Table naming, sanitization
-├── test_stress_concurrency.py # High-load scenarios
-├── test_transport.py         # HTTP/SSE transport
-└── test_watcher.py           # File watching, auto-refresh
+├── test_auth.py                      # API key authentication (1 test)
+├── test_concurrency.py               # Thread safety, isolation (6 tests)
+├── test_drop_conditions.py           # Multi-column filtering (12 tests)
+├── test_examples_validation.py       # Real-world examples validation (17 tests)
+├── test_format_handling.py           # Format detection, normalization (15 tests)
+├── test_integration.py               # Multi-file loading, querying, golden path (19 tests)
+├── test_issue_fixes.py               # Regression tests (10 tests)
+├── test_loader.py                    # Excel loading, transformations (28 tests)
+├── test_multi_table.py               # Multi-table detection (23 tests)
+├── test_multi_table_edge_cases.py    # Edge cases: merged cells, formulas (17 tests)
+├── test_naming.py                    # Table naming, hierarchical structure (38 tests)
+├── test_performance.py               # LRU cache performance (12 tests)
+├── test_stress_concurrency.py        # High-load scenarios (4 tests)
+├── test_transport.py                 # HTTP/SSE transport (5 tests)
+├── test_validation.py                # Configuration validation (7 tests)
+├── test_views.py                     # View management (13 tests)
+├── test_views_persistence.py         # View persistence across restarts (7 tests)
+└── test_watcher.py                   # File watching, auto-refresh (6 tests)
 ```
 
 **Test categories:**
 - `@pytest.mark.unit` - Unit tests (fast, isolated)
 - `@pytest.mark.integration` - Integration tests (slower, multi-component)
+- `@pytest.mark.regression` - Regression tests (bug fixes)
 - `@pytest.mark.concurrency` - Concurrency tests (thread safety)
 - `@pytest.mark.stress` - Stress tests (100+ operations)
+
+See tests/README.md for detailed test documentation.

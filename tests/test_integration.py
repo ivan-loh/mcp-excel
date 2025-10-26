@@ -4,9 +4,51 @@ from pathlib import Path
 import pandas as pd
 import re
 import mcp_excel.server as server
-from conftest import get_sanitized_alias
+from tests.conftest import get_sanitized_alias
 
 pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("setup_server")]
+
+
+def test_simple_excel_end_to_end(temp_dir):
+    file_path = temp_dir / "employees.xlsx"
+    df = pd.DataFrame({
+        "Name": ["Alice Johnson", "Bob Smith", "Charlie Davis"],
+        "Department": ["Engineering", "Sales", "Engineering"],
+        "Location": ["NYC", "LA", "SF"]
+    })
+    df.to_excel(file_path, sheet_name="Staff", index=False)
+
+    overrides = {
+        "employees.xlsx": {
+            "sheet_overrides": {
+                "Staff": {"header_rows": 1}
+            }
+        }
+    }
+
+    alias = get_sanitized_alias(Path(temp_dir))
+    server.load_dir(path=str(temp_dir), overrides=overrides)
+
+    result = server.query(f'SELECT * FROM "{alias}.employees.staff"')
+    assert result["row_count"] == 3
+    assert result["columns"][0]["name"] == "Name"
+    assert result["columns"][1]["name"] == "Department"
+    assert result["columns"][2]["name"] == "Location"
+
+    rows_dict = {row[0]: row for row in result["rows"]}
+    assert "Alice Johnson" in rows_dict
+    assert "Bob Smith" in rows_dict
+    assert "Charlie Davis" in rows_dict
+
+    result = server.query(f'SELECT Name, Location FROM "{alias}.employees.staff" WHERE Department = \'Engineering\'')
+    assert result["row_count"] == 2
+    names = [row[0] for row in result["rows"]]
+    assert "Alice Johnson" in names
+    assert "Charlie Davis" in names
+
+    result = server.query(f'SELECT COUNT(*) as count FROM "{alias}.employees.staff" WHERE Location = \'NYC\'')
+    assert result["row_count"] == 1
+    assert result["rows"][0][0] == 1
 
 
 def test_load_multiple_files(test_data_dir):

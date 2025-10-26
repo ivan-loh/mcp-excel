@@ -111,11 +111,9 @@ class FormatManager:
     ) -> ParseOptions:
         options = ParseOptions()
 
-        # Set defaults based on format
         if format_info.encoding:
             options.encoding = format_info.encoding
 
-        # Apply user options
         if user_options:
             for key, value in user_options.items():
                 if hasattr(options, key):
