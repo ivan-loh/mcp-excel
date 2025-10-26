@@ -12,12 +12,12 @@ import yaml
 from fastmcp import FastMCP
 from starlette.middleware import Middleware
 
-from .types import TableMeta, SheetOverride, LoadConfig
-from .naming import TableRegistry
-from .loader import ExcelLoader
-from .watcher import FileWatcher
-from .auth import APIKeyMiddleware, get_api_key_from_env
-from . import logging as log
+from .models import TableMeta, SheetOverride, LoadConfig
+from .utils.naming import TableRegistry
+from .loading.loader import ExcelLoader
+from .utils.watcher import FileWatcher
+from .utils.auth import APIKeyMiddleware, get_api_key_from_env
+from .utils import log
 
 
 mcp = FastMCP("mcp-server-excel-sql")

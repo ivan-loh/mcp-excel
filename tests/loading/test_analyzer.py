@@ -4,7 +4,7 @@ import pytest
 import openpyxl
 import time
 
-from mcp_excel.structure_analyzer import ExcelAnalyzer, LRUCache
+from mcp_excel.loading.analyzer import ExcelAnalyzer, LRUCache
 
 
 def test_lru_cache_basic():

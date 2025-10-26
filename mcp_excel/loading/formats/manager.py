@@ -24,24 +24,18 @@ class FormatManager:
         sheet: Optional[str] = None,
         options: Optional[Dict[str, Any]] = None
     ) -> pd.DataFrame:
-        # Detect format
         format_info = self.detector.detect(file_path)
 
         if format_info.format_type == 'unknown':
-            # Try to load as Excel anyway
             format_info.format_type = 'xlsx'
 
-        # Find appropriate handler
         handler = self._get_handler(format_info.format_type)
         if not handler:
             raise ValueError(f"No handler available for format {format_info.format_type}")
 
-        # Validate file
         is_valid, error = handler.validate(file_path)
         if not is_valid:
-            # Try as different format
             if format_info.format_type == 'xlsx':
-                # Try as XLS
                 xls_handler = XLSHandler()
                 is_valid, error = xls_handler.validate(file_path)
                 if is_valid:
@@ -51,16 +45,12 @@ class FormatManager:
             if not is_valid:
                 raise ValueError(f"File validation failed: {error}")
 
-        # Create parse options
         parse_options = self._create_parse_options(format_info, options)
 
-        # Parse file
         try:
             df = handler.parse(file_path, sheet, parse_options)
         except Exception as e:
-            # Try alternative handler
             if format_info.format_type == 'xlsx':
-                # Try pandas directly
                 df = pd.read_excel(
                     file_path,
                     sheet_name=sheet,
@@ -71,7 +61,6 @@ class FormatManager:
             else:
                 raise e
 
-        # Normalize data
         if options and options.get('normalize', True):
             df = self.normalizer.normalize(df, options)
 
@@ -88,7 +77,6 @@ class FormatManager:
             try:
                 return handler.get_sheets(file_path)
             except:
-                # Try alternative handlers
                 for h in self.handlers:
                     if h != handler:
                         try:

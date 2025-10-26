@@ -37,16 +37,13 @@ class FormatDetector:
         with open(file_path, 'rb') as f:
             header = f.read(8192)
 
-        # Check magic bytes first
         for signature, format_family in self.SIGNATURES.items():
             if header.startswith(signature):
                 return self._analyze_format_family(file_path, format_family, header)
 
-        # Check if CSV/TSV by content
         if self._is_text_based(header):
             return self._analyze_text_format(file_path, header)
 
-        # Fallback to extension
         extension = file_path.suffix.lower()
         if extension == '.xlsx':
             return FormatInfo(format_type='xlsx', confidence=0.5)
@@ -122,20 +119,16 @@ class FormatDetector:
         try:
             text_sample = header.decode('utf-8', errors='ignore')
 
-            # Check for CSV/TSV patterns
             lines = text_sample.split('\n')[:10]
             if len(lines) >= 2:
-                # Check for tab delimiter
                 tab_counts = [line.count('\t') for line in lines if line]
                 if tab_counts and all(c == tab_counts[0] for c in tab_counts) and tab_counts[0] > 0:
                     return FormatInfo(format_type='tsv', encoding='utf-8', confidence=0.8)
 
-                # Check for comma delimiter
                 comma_counts = [line.count(',') for line in lines if line]
                 if comma_counts and all(c == comma_counts[0] for c in comma_counts) and comma_counts[0] > 0:
                     return FormatInfo(format_type='csv', encoding='utf-8', confidence=0.8)
 
-                # Check for semicolon delimiter
                 semicolon_counts = [line.count(';') for line in lines if line]
                 if semicolon_counts and all(c == semicolon_counts[0] for c in semicolon_counts) and semicolon_counts[0] > 0:
                     return FormatInfo(format_type='csv', encoding='utf-8', confidence=0.8)

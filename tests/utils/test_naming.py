@@ -1,8 +1,7 @@
 import pytest
 import threading
 from pathlib import Path
-from mcp_excel.naming import TableRegistry
-from mcp_excel.naming_improved import ImprovedTableRegistry
+from mcp_excel.utils.naming import TableRegistry, ImprovedTableRegistry
 
 pytestmark = pytest.mark.unit
 

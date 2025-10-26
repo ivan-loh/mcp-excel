@@ -101,15 +101,12 @@ class XLSXHandler(FormatHandler):
         if not data:
             return pd.DataFrame()
 
-        # Handle skip_rows
         if options.skip_rows > 0:
             data = data[options.skip_rows:]
 
-        # Handle skip_footer
         if options.skip_footer > 0:
             data = data[:-options.skip_footer]
 
-        # Handle headers
         if options.header_rows > 0 and len(data) > options.header_rows:
             headers = data[:options.header_rows]
             data = data[options.header_rows:]
@@ -117,7 +114,6 @@ class XLSXHandler(FormatHandler):
             if options.header_rows == 1:
                 columns = [str(h) if h else f'col_{i}' for i, h in enumerate(headers[0])]
             else:
-                # Multi-row headers - combine them
                 columns = []
                 for col_idx in range(len(headers[0])):
                     col_parts = []
@@ -129,8 +125,6 @@ class XLSXHandler(FormatHandler):
             columns = [f'col_{i}' for i in range(len(data[0]) if data else 0)]
 
         df = pd.DataFrame(data, columns=columns)
-
-        # Clean data
         df = self._clean_excel_data(df, options)
 
         return df
@@ -172,7 +166,6 @@ class XLSXHandler(FormatHandler):
             wb.close()
             return sheets
         except:
-            # Fallback
             xl_file = pd.ExcelFile(file_path, engine='openpyxl')
             sheets = xl_file.sheet_names
             xl_file.close()
@@ -193,7 +186,6 @@ class XLSHandler(FormatHandler):
 
     def parse(self, file_path: Path, sheet: Optional[str], options: ParseOptions) -> pd.DataFrame:
         try:
-            # Try using pandas with xlrd
             df = pd.read_excel(
                 file_path,
                 sheet_name=sheet if sheet else 0,
@@ -204,7 +196,6 @@ class XLSHandler(FormatHandler):
             )
             return df
         except ImportError:
-            # If xlrd not available, try openpyxl
             return pd.read_excel(
                 file_path,
                 sheet_name=sheet if sheet else 0,
@@ -281,7 +272,6 @@ class CSVHandler(FormatHandler):
             dialect = sniffer.sniff(sample)
             return dialect.delimiter
         except:
-            # Fallback to common delimiters
             with open(file_path, 'r', encoding=encoding, errors='ignore') as f:
                 lines = f.readlines()[:10]
 

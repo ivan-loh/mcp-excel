@@ -14,7 +14,6 @@ class DataNormalizer:
         if options is None:
             options = {}
 
-        # Apply normalization steps
         df = self.clean_whitespace(df, options)
         df = self.normalize_numbers(df, options)
         df = self.normalize_dates(df, options)
@@ -107,7 +106,6 @@ class DataNormalizer:
         if len(sample) == 0:
             return False
 
-        # Pattern for numbers with optional formatting
         pattern = r'^[+-]?[\d,. ]+$|^\([0-9,. ]+\)$|^[$€£¥₹][0-9,. ]+$'
         matches = sample.str.match(pattern).sum()
         return matches > len(sample) * 0.5
@@ -135,25 +133,19 @@ class DataNormalizer:
         return df
 
     def handle_missing_values(self, df: pd.DataFrame, options: Dict) -> pd.DataFrame:
-        # Common missing value representations
         missing_values = [
             'NA', 'N/A', 'n/a', '#N/A', 'null', 'NULL', 'None', 'NONE',
             '-', '--', '---', '.', '..', '...', '?', '??', '???',
             'nan', 'NaN', 'NAN'
         ]
 
-        # Add custom missing values from options
         missing_values.extend(options.get('custom_na_values', []))
-
-        # Replace with NaN
         df = df.replace(missing_values, np.nan)
 
-        # Handle empty strings
         if options.get('empty_string_as_na', True):
             df = df.replace('', np.nan)
-            df = df.replace('nan', np.nan)  # String 'nan' from str conversion
+            df = df.replace('nan', np.nan)
 
-        # Remove completely empty rows/columns
         if options.get('drop_empty_rows', True):
             df = df.dropna(how='all')
 

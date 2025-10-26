@@ -1,12 +1,12 @@
 import pytest
 from pathlib import Path
 import mcp_excel.server as server
-from mcp_excel.loader import ExcelLoader
-from mcp_excel.types import SheetOverride, LocaleConfig
+from mcp_excel.loading.loader import ExcelLoader
+from mcp_excel.models import SheetOverride, LocaleConfig
 
 pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("setup_server")]
 
-examples_dir = Path(__file__).parent.parent / "examples"
+examples_dir = Path(__file__).parent.parent.parent / "examples"
 finance_dir = examples_dir / "finance"
 
 

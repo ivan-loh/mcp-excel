@@ -5,8 +5,8 @@ from pathlib import Path
 import pandas as pd
 import duckdb
 import mcp_excel.server as server
-from mcp_excel.loader import ExcelLoader
-from mcp_excel.naming import TableRegistry
+from mcp_excel.loading.loader import ExcelLoader
+from mcp_excel.utils.naming import TableRegistry
 
 
 @pytest.fixture

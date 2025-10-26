@@ -2,7 +2,7 @@ import pytest
 from pathlib import Path
 import pandas as pd
 import openpyxl
-from mcp_excel.types import SheetOverride, MergeHandlingConfig
+from mcp_excel.models import SheetOverride, MergeHandlingConfig
 
 pytestmark = pytest.mark.unit
 
@@ -427,7 +427,7 @@ def test_csv_encoding_override(temp_dir, loader):
     content = "Name,Value\nCafé,100\nNaïve,200"
     file_path.write_text(content, encoding='latin-1')
 
-    from mcp_excel.formats.handlers import ParseOptions
+    from mcp_excel.loading.formats.handlers import ParseOptions
     override = SheetOverride(header_rows=1)
 
     metas = loader.load_sheet(file_path, "override_encoding.csv", "Sheet1", "csv", override)
@@ -449,7 +449,7 @@ def test_european_number_excel(temp_dir, loader):
 
     wb.save(file_path)
 
-    from mcp_excel.types import LocaleConfig
+    from mcp_excel.models import LocaleConfig
     override = SheetOverride(
         header_rows=1,
         locale=LocaleConfig(
@@ -473,7 +473,7 @@ Widget;1.234,56
 Gadget;2.500,00"""
     file_path.write_text(content, encoding='utf-8')
 
-    from mcp_excel.types import LocaleConfig
+    from mcp_excel.models import LocaleConfig
     override = SheetOverride(
         header_rows=1,
         locale=LocaleConfig(

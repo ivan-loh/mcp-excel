@@ -4,8 +4,8 @@ from collections import OrderedDict
 import openpyxl
 from openpyxl.worksheet.worksheet import Worksheet
 
-from .types import StructureInfo
-from . import logging as log
+from ..models import StructureInfo
+from ..utils import log
 
 
 class LRUCache:

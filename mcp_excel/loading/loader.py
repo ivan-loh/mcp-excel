@@ -4,11 +4,11 @@ from typing import Optional
 import pandas as pd
 import duckdb
 
-from .types import SheetOverride, TableMeta, MergeHandlingConfig
-from .naming import TableRegistry
+from ..models import SheetOverride, TableMeta, MergeHandlingConfig
+from ..utils.naming import TableRegistry
 from .formats.manager import FormatManager
-from .structure_analyzer import ExcelAnalyzer
-from . import logging as log
+from .analyzer import ExcelAnalyzer
+from ..utils import log
 
 
 class ExcelLoader:
@@ -187,12 +187,9 @@ class ExcelLoader:
 
     def _load_raw(self, file: Path, relpath: str, sheet: str, table_name: str, alias: str) -> TableMeta:
         try:
-            # Check file extension to decide loading strategy
             if file.suffix.lower() not in ['.xlsx', '.xlsm']:
-                # Use format manager for non-Excel files
                 df = self.format_manager.load_file(file, sheet, {'normalize': False})
 
-                # Register with a temporary name to avoid catalog issues
                 import hashlib
                 temp_table = f"temp_{hashlib.md5(table_name.encode()).hexdigest()[:8]}"
                 self.conn.register(temp_table, df)
@@ -203,7 +200,6 @@ class ExcelLoader:
                 """)
                 est_rows = len(df)
             else:
-                # Use DuckDB for Excel files
                 self.conn.execute(f"""
                     CREATE OR REPLACE VIEW "{table_name}" AS
                     SELECT * FROM read_xlsx(
@@ -261,7 +257,6 @@ class ExcelLoader:
                     })
                 df = self.format_manager.load_file(file, sheet, options)
 
-                # Apply additional overrides
                 if override.drop_regex and len(df.columns) > 0:
                     first_col = df.columns[0]
                     df = df[~df[first_col].astype(str).str.match(override.drop_regex, na=False)]
@@ -520,23 +515,18 @@ class ExcelLoader:
         return ""
 
     def get_sheet_names(self, file: Path) -> list[str]:
-        # Check file extension
         if file.suffix.lower() not in ['.xlsx', '.xlsm', '.xls']:
-            # Use format manager for non-Excel files
             return self.format_manager.get_sheets(file)
 
-        # Try DuckDB first for Excel files
         try:
             result = self.conn.execute(f"""
                 SELECT sheet_name FROM st_read('{file}')
             """).fetchall()
             return [row[0] for row in result]
         except Exception:
-            # Try format manager as fallback
             try:
                 return self.format_manager.get_sheets(file)
             except:
-                # Final fallback to openpyxl
                 try:
                     import openpyxl
                     wb = openpyxl.load_workbook(file, read_only=True, data_only=True)

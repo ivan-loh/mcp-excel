@@ -1,6 +1,6 @@
 [project]
 name = "mcp-server-excel-sql"
-version = "0.6.0"
+version = "0.7.0"
 description = "Let Claude query Excel files using SQL - no SQL knowledge required"
 authors = [{name = "Ivan", email = "ivan@eriad.com"}]
 readme = "README.md"

@@ -675,12 +675,14 @@ python -m mcp_excel.server --path examples
 ### Testing
 
 **Test coverage: 240 tests**
-- 153 unit tests (naming, loading, multi-table, format handling, auth, drop conditions, performance, validation)
-- 54 integration tests (server workflows, examples, watcher, transport, golden path, view management)
-- 10 regression tests (bug fixes, edge cases)
-- 6 concurrency tests (thread safety, parallel queries)
-- 4 stress tests (100+ concurrent operations, memory leak detection)
-- 13 view management tests (view creation, persistence, queries)
+- 159 unit tests (loading: 96, utils: 45, root: 18)
+- 81 integration tests (server workflows, examples, transport, views, concurrency, stress)
+- 10 regression tests (bug fixes in integration/)
+- 6 concurrency tests (thread safety in integration/)
+- 4 stress tests (high-load scenarios in integration/)
+- 20 view management tests (13 core + 7 persistence in integration/)
+
+**Note:** Some categories overlap (e.g., regression, concurrency, stress are subsets of integration tests)
 
 **Running tests:**
 ```bash
@@ -696,8 +698,13 @@ pytest -m integration
 pytest -m concurrency
 pytest -m stress
 
+# Run by module
+pytest tests/loading/            # all loading tests
+pytest tests/utils/              # all utils tests
+pytest tests/integration/        # all integration tests
+
 # Run specific test file
-pytest tests/test_multi_table.py -v
+pytest tests/loading/test_multi_table.py -v
 ```
 
 **Writing new tests:**
@@ -868,7 +875,7 @@ curl http://localhost:8000/health  # If health endpoint exists
 top -p $(pgrep -f mcp-server-excel-sql)
 
 # Check for memory leaks (run stress tests)
-pytest tests/test_stress_concurrency.py::test_stress_no_memory_leaks
+pytest tests/integration/test_stress_concurrency.py::test_stress_no_memory_leaks
 ```
 
 ## Reference
@@ -892,26 +899,38 @@ pytest tests/test_stress_concurrency.py::test_stress_no_memory_leaks
 
 ### Test Structure
 
+Tests are organized to mirror the source code structure:
+
 ```
 tests/
-├── test_auth.py                      # API key authentication (1 test)
-├── test_concurrency.py               # Thread safety, isolation (6 tests)
-├── test_drop_conditions.py           # Multi-column filtering (12 tests)
-├── test_examples_validation.py       # Real-world examples validation (17 tests)
-├── test_format_handling.py           # Format detection, normalization (15 tests)
-├── test_integration.py               # Multi-file loading, querying, golden path (19 tests)
-├── test_issue_fixes.py               # Regression tests (10 tests)
-├── test_loader.py                    # Excel loading, transformations (28 tests)
-├── test_multi_table.py               # Multi-table detection (23 tests)
-├── test_multi_table_edge_cases.py    # Edge cases: merged cells, formulas (17 tests)
-├── test_naming.py                    # Table naming, hierarchical structure (38 tests)
-├── test_performance.py               # LRU cache performance (12 tests)
-├── test_stress_concurrency.py        # High-load scenarios (4 tests)
-├── test_transport.py                 # HTTP/SSE transport (5 tests)
-├── test_validation.py                # Configuration validation (7 tests)
-├── test_views.py                     # View management (13 tests)
-├── test_views_persistence.py         # View persistence across restarts (7 tests)
-└── test_watcher.py                   # File watching, auto-refresh (6 tests)
+├── conftest.py                          # Shared fixtures
+├── fixtures/                            # Test data files
+│
+├── loading/                             # mirrors mcp_excel/loading/
+│   ├── test_loader.py                   # ExcelLoader tests (28 tests)
+│   ├── test_analyzer.py                 # Structure analyzer, LRU cache (12 tests)
+│   ├── test_multi_table.py              # Multi-table detection (23 tests)
+│   ├── test_multi_table_edge_cases.py   # Edge cases: merged cells, formulas (17 tests)
+│   └── formats/                         # mirrors mcp_excel/loading/formats/
+│       └── test_format_handling.py      # Format detection, handlers (15 tests)
+│
+├── utils/                               # mirrors mcp_excel/utils/
+│   ├── test_auth.py                     # API key authentication (1 test)
+│   ├── test_naming.py                   # Table naming, collision handling (38 tests)
+│   └── test_watcher.py                  # File watching, debouncing (6 tests)
+│
+├── integration/                         # End-to-end and system tests
+│   ├── test_integration.py              # Server workflows, golden path (19 tests)
+│   ├── test_examples_validation.py      # Real-world examples (17 tests)
+│   ├── test_views.py                    # View management (13 tests)
+│   ├── test_views_persistence.py        # View persistence (7 tests)
+│   ├── test_concurrency.py              # Thread safety (6 tests)
+│   ├── test_stress_concurrency.py       # High-load scenarios (4 tests)
+│   ├── test_transport.py                # HTTP/SSE transport (5 tests)
+│   └── test_issue_fixes.py              # Regression tests (10 tests)
+│
+├── test_drop_conditions.py              # Multi-column filtering (12 tests)
+└── test_validation.py                   # Configuration validation (7 tests)
 ```
 
 **Test categories:**

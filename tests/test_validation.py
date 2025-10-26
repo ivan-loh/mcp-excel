@@ -2,9 +2,9 @@ import pytest
 from pathlib import Path
 import openpyxl
 
-from mcp_excel.types import SheetOverride, StructureInfo
-from mcp_excel.loader import ExcelLoader
-from mcp_excel.naming_improved import ImprovedTableRegistry
+from mcp_excel.models import SheetOverride, StructureInfo
+from mcp_excel.loading.loader import ExcelLoader
+from mcp_excel.utils.naming import ImprovedTableRegistry
 import duckdb
 
 pytestmark = pytest.mark.unit

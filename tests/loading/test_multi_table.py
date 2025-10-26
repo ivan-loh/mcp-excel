@@ -1,7 +1,7 @@
 import pytest
 from pathlib import Path
 import openpyxl
-from mcp_excel.types import SheetOverride
+from mcp_excel.models import SheetOverride
 
 pytestmark = pytest.mark.unit
 
@@ -9,7 +9,7 @@ pytestmark = pytest.mark.unit
 # Basic Detection Tests
 
 def test_detect_multiple_tables_basic(loader):
-    fixture_path = Path(__file__).parent / "fixtures" / "multi_table_test.xlsx"
+    fixture_path = Path(__file__).parent.parent / "fixtures" / "multi_table_test.xlsx"
     override = SheetOverride(auto_detect=True, header_rows=1)
     metas = loader.load_sheet(fixture_path, "multi_table_test.xlsx", "MultiTable", "test", override)
 
@@ -19,7 +19,7 @@ def test_detect_multiple_tables_basic(loader):
 
 
 def test_detect_three_tables(loader):
-    fixture_path = Path(__file__).parent / "fixtures" / "multi_table_test.xlsx"
+    fixture_path = Path(__file__).parent.parent / "fixtures" / "multi_table_test.xlsx"
     override = SheetOverride(auto_detect=True, header_rows=1)
     metas = loader.load_sheet(fixture_path, "multi_table_test.xlsx", "ThreeTables", "test", override)
 
@@ -31,7 +31,7 @@ def test_detect_three_tables(loader):
 
 def test_extract_specific_table(loader):
     """Test extract_table parameter to load only a specific table by index from multi-table sheet"""
-    fixture_path = Path(__file__).parent / "fixtures" / "multi_table_test.xlsx"
+    fixture_path = Path(__file__).parent.parent / "fixtures" / "multi_table_test.xlsx"
     override = SheetOverride(auto_detect=True, header_rows=1, extract_table=1)
     metas = loader.load_sheet(fixture_path, "multi_table_test.xlsx", "MultiTable", "test", override)
 
@@ -41,7 +41,7 @@ def test_extract_specific_table(loader):
 
 def test_extract_table_index_zero(loader):
     """Test extract_table=0 explicitly extracts the first table (index 0)"""
-    fixture_path = Path(__file__).parent / "fixtures" / "multi_table_test.xlsx"
+    fixture_path = Path(__file__).parent.parent / "fixtures" / "multi_table_test.xlsx"
     override = SheetOverride(auto_detect=True, header_rows=1, extract_table=0)
     metas = loader.load_sheet(fixture_path, "multi_table_test.xlsx", "MultiTable", "test", override)
 
@@ -51,7 +51,7 @@ def test_extract_table_index_zero(loader):
 
 def test_extract_table_out_of_range(loader):
     """Test that out-of-range extract_table index falls back to first table gracefully"""
-    fixture_path = Path(__file__).parent / "fixtures" / "multi_table_test.xlsx"
+    fixture_path = Path(__file__).parent.parent / "fixtures" / "multi_table_test.xlsx"
     override = SheetOverride(auto_detect=True, header_rows=1, extract_table=10)
     metas = loader.load_sheet(fixture_path, "multi_table_test.xlsx", "MultiTable", "test", override)
 
@@ -60,7 +60,7 @@ def test_extract_table_out_of_range(loader):
 
 def test_multi_table_sql_query(loader):
     """Test SQL queries work correctly on multi-table views with expected row counts from fixture"""
-    fixture_path = Path(__file__).parent / "fixtures" / "multi_table_test.xlsx"
+    fixture_path = Path(__file__).parent.parent / "fixtures" / "multi_table_test.xlsx"
     override = SheetOverride(auto_detect=True, header_rows=1)
     metas = loader.load_sheet(fixture_path, "multi_table_test.xlsx", "MultiTable", "test", override)
 
@@ -73,7 +73,7 @@ def test_multi_table_sql_query(loader):
 
 def test_multi_table_separate_views(loader):
     """Test that each detected table creates a separate view in DuckDB information_schema"""
-    fixture_path = Path(__file__).parent / "fixtures" / "multi_table_test.xlsx"
+    fixture_path = Path(__file__).parent.parent / "fixtures" / "multi_table_test.xlsx"
     override = SheetOverride(auto_detect=True, header_rows=1)
     metas = loader.load_sheet(fixture_path, "multi_table_test.xlsx", "MultiTable", "test", override)
 
@@ -86,7 +86,7 @@ def test_multi_table_separate_views(loader):
 
 def test_single_table_no_suffix(loader):
     """Test that single tables don't get _table0 suffix in their name (only multi-table gets suffixes)"""
-    fixture_path = Path(__file__).parent / "fixtures" / "multi_table_test.xlsx"
+    fixture_path = Path(__file__).parent.parent / "fixtures" / "multi_table_test.xlsx"
     override = SheetOverride(auto_detect=True, header_rows=1)
     metas = loader.load_sheet(fixture_path, "multi_table_test.xlsx", "SingleTable", "test", override)
 
@@ -96,7 +96,7 @@ def test_single_table_no_suffix(loader):
 
 def test_multi_table_different_columns(loader):
     """Test that multiple tables can have same column count but different column names and data"""
-    fixture_path = Path(__file__).parent / "fixtures" / "multi_table_test.xlsx"
+    fixture_path = Path(__file__).parent.parent / "fixtures" / "multi_table_test.xlsx"
     override = SheetOverride(auto_detect=True, header_rows=1)
     metas = loader.load_sheet(fixture_path, "multi_table_test.xlsx", "MultiTable", "test", override)
 
@@ -231,7 +231,7 @@ def test_auto_detect_single_table(temp_dir, loader):
 
 def test_multi_table_metadata(loader):
     """Test that multi-table loading returns correct metadata for each table (mode, rows, names)"""
-    fixture_path = Path(__file__).parent / "fixtures" / "multi_table_test.xlsx"
+    fixture_path = Path(__file__).parent.parent / "fixtures" / "multi_table_test.xlsx"
     override = SheetOverride(auto_detect=True, header_rows=1)
     metas = loader.load_sheet(fixture_path, "multi_table_test.xlsx", "MultiTable", "test", override)
 
@@ -244,7 +244,7 @@ def test_multi_table_metadata(loader):
 
 def test_multi_table_without_auto_detect(loader):
     """Test that auto_detect=False prevents multi-table detection, loads entire sheet as single table"""
-    fixture_path = Path(__file__).parent / "fixtures" / "multi_table_test.xlsx"
+    fixture_path = Path(__file__).parent.parent / "fixtures" / "multi_table_test.xlsx"
     override = SheetOverride(auto_detect=False, header_rows=1)
     metas = loader.load_sheet(fixture_path, "multi_table_test.xlsx", "MultiTable", "test", override)
 
@@ -295,7 +295,7 @@ def test_nested_blank_rows_within_table(temp_dir, loader):
 
 def test_multi_table_returns_list(loader):
     """Test that load_sheet always returns a list for multi-table results (backwards compatibility)"""
-    fixture_path = Path(__file__).parent / "fixtures" / "multi_table_test.xlsx"
+    fixture_path = Path(__file__).parent.parent / "fixtures" / "multi_table_test.xlsx"
     override = SheetOverride(auto_detect=True, header_rows=1)
     metas = loader.load_sheet(fixture_path, "multi_table_test.xlsx", "MultiTable", "test", override)
 
@@ -313,7 +313,7 @@ def test_single_table_returns_list(loader, sample_excel):
 
 def test_multi_table_naming_convention(loader):
     """Test that multi-table names follow _table0, _table1, _table2 naming convention"""
-    fixture_path = Path(__file__).parent / "fixtures" / "multi_table_test.xlsx"
+    fixture_path = Path(__file__).parent.parent / "fixtures" / "multi_table_test.xlsx"
     override = SheetOverride(auto_detect=True, header_rows=1)
     metas = loader.load_sheet(fixture_path, "multi_table_test.xlsx", "MultiTable", "test", override)
 
@@ -322,7 +322,7 @@ def test_multi_table_naming_convention(loader):
 
 
 def test_multi_table_query_isolation(loader):
-    fixture_path = Path(__file__).parent / "fixtures" / "multi_table_test.xlsx"
+    fixture_path = Path(__file__).parent.parent / "fixtures" / "multi_table_test.xlsx"
     override = SheetOverride(auto_detect=True, header_rows=1)
     metas = loader.load_sheet(fixture_path, "multi_table_test.xlsx", "MultiTable", "test", override)
 

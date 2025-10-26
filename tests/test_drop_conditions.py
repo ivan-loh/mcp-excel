@@ -3,7 +3,7 @@ from pathlib import Path
 import pandas as pd
 import openpyxl
 
-from mcp_excel.types import SheetOverride
+from mcp_excel.models import SheetOverride
 
 pytestmark = pytest.mark.unit
 

@@ -1,7 +1,7 @@
 import pytest
 from pathlib import Path
 import openpyxl
-from mcp_excel.types import SheetOverride, MergeHandlingConfig, LocaleConfig
+from mcp_excel.models import SheetOverride, MergeHandlingConfig, LocaleConfig
 
 pytestmark = pytest.mark.unit
 
@@ -88,7 +88,7 @@ def test_multi_table_with_hidden_rows(temp_dir, loader):
 
 def test_multi_table_with_drop_regex(loader):
     """Test multi-table with drop_regex applied to each table"""
-    fixture_path = Path(__file__).parent / "fixtures" / "multi_table_test.xlsx"
+    fixture_path = Path(__file__).parent.parent / "fixtures" / "multi_table_test.xlsx"
     override = SheetOverride(
         auto_detect=True,
         header_rows=1,
@@ -110,7 +110,7 @@ def test_multi_table_with_drop_regex(loader):
 
 def test_multi_table_with_column_renames(loader):
     """Test multi-table with column_renames applied to all tables"""
-    fixture_path = Path(__file__).parent / "fixtures" / "multi_table_test.xlsx"
+    fixture_path = Path(__file__).parent.parent / "fixtures" / "multi_table_test.xlsx"
     override = SheetOverride(
         auto_detect=True,
         header_rows=1,
@@ -219,7 +219,7 @@ def test_table_with_no_header(temp_dir, loader):
 
 def test_extract_table_negative_index(loader):
     """Test extract_table with negative index"""
-    fixture_path = Path(__file__).parent / "fixtures" / "multi_table_test.xlsx"
+    fixture_path = Path(__file__).parent.parent / "fixtures" / "multi_table_test.xlsx"
     override = SheetOverride(auto_detect=True, header_rows=1, extract_table=-1)
     metas = loader.load_sheet(fixture_path, "multi_table_test.xlsx", "MultiTable", "test", override)
 
@@ -228,7 +228,7 @@ def test_extract_table_negative_index(loader):
 
 def test_both_extract_table_and_range(loader):
     """Test conflicting extract_table and table_range parameters"""
-    fixture_path = Path(__file__).parent / "fixtures" / "multi_table_test.xlsx"
+    fixture_path = Path(__file__).parent.parent / "fixtures" / "multi_table_test.xlsx"
     override = SheetOverride(
         auto_detect=True,
         header_rows=1,
@@ -395,7 +395,7 @@ def test_partial_blank_row_not_separator(temp_dir, loader):
 
 def test_multi_table_catalog_integration(loader):
     """Test that all tables are properly registered in catalog"""
-    fixture_path = Path(__file__).parent / "fixtures" / "multi_table_test.xlsx"
+    fixture_path = Path(__file__).parent.parent / "fixtures" / "multi_table_test.xlsx"
     override = SheetOverride(auto_detect=True, header_rows=1)
     metas = loader.load_sheet(fixture_path, "multi_table_test.xlsx", "MultiTable", "test", override)
 
@@ -409,7 +409,7 @@ def test_multi_table_catalog_integration(loader):
 
 def test_auto_detect_false_no_multi_table(loader):
     """Test that auto_detect=False prevents multi-table detection"""
-    fixture_path = Path(__file__).parent / "fixtures" / "multi_table_test.xlsx"
+    fixture_path = Path(__file__).parent.parent / "fixtures" / "multi_table_test.xlsx"
     override = SheetOverride(auto_detect=False, header_rows=1)
     metas = loader.load_sheet(fixture_path, "multi_table_test.xlsx", "MultiTable", "test", override)
 

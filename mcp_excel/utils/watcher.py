@@ -5,7 +5,7 @@ from typing import Callable, Optional
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileSystemEvent
 
-from . import logging as log
+from . import log
 
 
 class ExcelFileHandler(FileSystemEventHandler):

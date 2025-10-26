@@ -3,7 +3,7 @@ import pytest
 
 @pytest.mark.unit
 def test_api_key_middleware():
-    from mcp_excel.auth import APIKeyMiddleware
+    from mcp_excel.utils.auth import APIKeyMiddleware
     from starlette.applications import Starlette
     from starlette.responses import PlainTextResponse
     from starlette.testclient import TestClient

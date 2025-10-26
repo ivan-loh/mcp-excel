@@ -1,7 +1,7 @@
 import pytest
 import time
 import pandas as pd
-from mcp_excel.watcher import FileWatcher
+from mcp_excel.utils.watcher import FileWatcher
 
 pytestmark = pytest.mark.integration
 

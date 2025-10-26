@@ -6,10 +6,10 @@ import pandas as pd
 import openpyxl
 
 import mcp_excel.server as server
-from mcp_excel.formats.detector import FormatDetector, FormatInfo
-from mcp_excel.formats.handlers import XLSXHandler, CSVHandler, ParseOptions
-from mcp_excel.formats.normalizer import DataNormalizer
-from mcp_excel.formats.manager import FormatManager
+from mcp_excel.loading.formats.detector import FormatDetector, FormatInfo
+from mcp_excel.loading.formats.handlers import XLSXHandler, CSVHandler, ParseOptions
+from mcp_excel.loading.formats.normalizer import DataNormalizer
+from mcp_excel.loading.formats.manager import FormatManager
 
 pytestmark = pytest.mark.unit
 

@@ -3,7 +3,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 from starlette.requests import Request
 
-from . import logging as log
+from . import log
 
 
 class APIKeyMiddleware(BaseHTTPMiddleware):
