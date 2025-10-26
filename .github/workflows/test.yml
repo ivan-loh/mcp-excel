@@ -21,4 +21,6 @@ jobs:
         with:
           python-version: '3.13'
       - run: pip install -e '.[dev]'
-      - run: pytest
+      - run: pytest -n auto -m "not stress" --ignore=tests/integration/test_transport.py
+      - run: pytest tests/integration/test_transport.py
+      - run: pytest -m stress

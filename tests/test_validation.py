@@ -4,7 +4,7 @@ import openpyxl
 
 from mcp_excel.models import SheetOverride, StructureInfo
 from mcp_excel.loading.loader import ExcelLoader
-from mcp_excel.utils.naming import ImprovedTableRegistry
+from mcp_excel.utils.naming import TableRegistry
 import duckdb
 
 pytestmark = pytest.mark.unit
@@ -56,7 +56,7 @@ def test_drop_conditions_unknown_operator(temp_dir, loader):
 
 def test_validate_override_options_low_confidence():
     conn = duckdb.connect()
-    registry = ImprovedTableRegistry()
+    registry = TableRegistry()
     loader = ExcelLoader(conn, registry)
 
     structure_info = StructureInfo(

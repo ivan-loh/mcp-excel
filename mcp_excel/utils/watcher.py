@@ -1,4 +1,3 @@
-import time
 import threading
 from pathlib import Path
 from typing import Callable, Optional
