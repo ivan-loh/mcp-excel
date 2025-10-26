@@ -527,46 +527,130 @@ def get_schema(table_name: str) -> dict:
 
 
 def _refresh_full(alias: str) -> dict:
-    with _catalog_lock:
-        tables_to_drop = [
-            table_name for table_name in catalog
-            if alias is None or table_name.startswith(f"{alias}.")
-        ]
+    import uuid
 
-    dropped_count = 0
+    if alias is None:
+        with _load_configs_lock:
+            aliases_to_refresh = list(load_configs.keys())
 
-    with get_connection() as conn:
-        for table_name in tables_to_drop:
-            try:
-                conn.execute(f'DROP VIEW IF EXISTS "{table_name}"')
+        if not aliases_to_refresh:
+            log.warn("refresh_no_configs")
+            return {"files_count": 0, "sheets_count": 0, "dropped": 0, "added": 0}
 
-                with _catalog_lock:
-                    del catalog[table_name]
+        total_files = 0
+        total_sheets = 0
+        total_dropped = 0
+        total_added = 0
 
-                dropped_count += 1
-            except Exception:
-                pass
+        for single_alias in aliases_to_refresh:
+            result = _refresh_full(single_alias)
+            total_files += result.get("files_count", 0)
+            total_sheets += result.get("sheets_count", 0)
+            total_dropped += result.get("dropped", 0)
+            total_added += result.get("added", 0)
 
-    added_count = 0
-    files_count = 0
-    sheets_count = 0
+        return {
+            "files_count": total_files,
+            "sheets_count": total_sheets,
+            "dropped": total_dropped,
+            "added": total_added,
+        }
 
     with _load_configs_lock:
-        load_config = load_configs.get(alias) if alias else None
+        load_config = load_configs.get(alias)
 
-    if load_config:
+    if not load_config:
+        log.warn("refresh_no_config", alias=alias)
+        return {"files_count": 0, "sheets_count": 0, "dropped": 0, "added": 0}
+
+    temp_uuid = uuid.uuid4().hex[:8]
+    temp_alias = f"__temp_{temp_uuid}"
+    sanitized_temp_alias = f"temp_{temp_uuid}"
+
+    try:
         result = load_dir(
             path=str(load_config.root),
-            alias=alias,
+            alias=temp_alias,
             include_glob=load_config.include_glob,
             exclude_glob=load_config.exclude_glob,
             overrides=load_config.overrides,
         )
-        added_count = result["tables_count"]
         files_count = result.get("files_count", 0)
         sheets_count = result.get("sheets_count", 0)
+    except Exception as e:
+        log.error("refresh_temp_load_failed", temp_alias=temp_alias, error=str(e))
+        with _load_configs_lock:
+            load_configs.pop(temp_alias, None)
+        raise
+
+    table_mapping = {}
+    with _catalog_lock:
+        for table_name in list(catalog.keys()):
+            if table_name.startswith(f"{sanitized_temp_alias}."):
+                suffix = table_name[len(sanitized_temp_alias) + 1:]
+                final_name = f"{alias}.{suffix}"
+                table_mapping[table_name] = final_name
+
+    dropped_count = 0
+    added_count = 0
+
+    with _catalog_lock:
+        with get_connection() as conn:
+            try:
+                conn.execute("BEGIN TRANSACTION")
+
+                for temp_name, final_name in table_mapping.items():
+                    conn.execute(f'DROP VIEW IF EXISTS "{final_name}"')
+                    conn.execute(f'ALTER VIEW "{temp_name}" RENAME TO "{final_name}"')
+
+                    temp_meta = catalog[temp_name]
+                    del catalog[temp_name]
+
+                    catalog[final_name] = TableMeta(
+                        table_name=final_name,
+                        alias=alias,
+                        file=temp_meta.file,
+                        relpath=temp_meta.relpath,
+                        sheet=temp_meta.sheet,
+                        mtime=temp_meta.mtime,
+                        mode=temp_meta.mode,
+                        est_rows=temp_meta.est_rows,
+                    )
+                    dropped_count += 1
+                    added_count += 1
+
+                conn.execute("COMMIT")
+
+            except Exception as e:
+                log.error("refresh_swap_failed", error=str(e))
+                try:
+                    conn.execute("ROLLBACK")
+                except Exception:
+                    pass
+
+                for temp_name in table_mapping.keys():
+                    try:
+                        conn.execute(f'DROP VIEW IF EXISTS "{temp_name}"')
+                        catalog.pop(temp_name, None)
+                    except Exception:
+                        pass
+
+                raise
+
+    with get_connection() as conn:
+        try:
+            conn.execute(f'DROP VIEW IF EXISTS "{sanitized_temp_alias}.__files"')
+            conn.execute(f'DROP VIEW IF EXISTS "{sanitized_temp_alias}.__tables"')
+        except Exception:
+            pass
+
+    with _load_configs_lock:
+        load_configs.pop(temp_alias, None)
 
     _create_system_views(alias)
+
+    log.info("refresh_full_complete", alias=alias,
+             dropped=dropped_count, added=added_count)
 
     return {
         "files_count": files_count,
