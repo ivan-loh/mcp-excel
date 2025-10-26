@@ -12,6 +12,7 @@ import yaml
 from fastmcp import FastMCP
 from starlette.middleware import Middleware
 
+from . import __version__
 from .models import TableMeta, SheetOverride, LoadConfig
 from .utils.naming import TableRegistry
 from .loading.loader import ExcelLoader
@@ -772,6 +773,10 @@ def stop_watching():
     watcher = None
 
 
+def version() -> dict:
+    return {"version": __version__}
+
+
 @mcp.tool()
 def tool_query(sql: str, max_rows: int = 10000, timeout_ms: int = 60000) -> dict:
     """
@@ -882,6 +887,16 @@ def tool_drop_view(view_name: str) -> dict:
     Returns: {view_name, dropped}
     """
     return drop_view(view_name)
+
+
+@mcp.tool()
+def tool_version() -> dict:
+    """
+    Get the version of the mcp-excel server.
+
+    Returns: {version}
+    """
+    return version()
 
 
 @click.command()

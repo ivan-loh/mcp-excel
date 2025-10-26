@@ -272,3 +272,11 @@ def test_load_with_current_directory():
             assert len(tables["tables"]) == 1
         finally:
             os.chdir(original_cwd)
+
+
+def test_version():
+    from mcp_excel import __version__
+    result = server.version()
+    assert "version" in result
+    assert result["version"] == __version__
+    assert result["version"] == "0.7.5"

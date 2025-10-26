@@ -50,6 +50,7 @@ async def test_streamable_http_list_tools(http_server: str):
         assert "tool_list_tables" in tool_names
         assert "tool_get_schema" in tool_names
         assert "tool_refresh" in tool_names
+        assert "tool_version" in tool_names
 
 
 @pytest.mark.asyncio
@@ -91,3 +92,13 @@ async def test_streamable_http_call_get_schema(http_server: str):
         assert schema_result.data is not None
         assert "columns" in schema_result.data
         assert len(schema_result.data["columns"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_streamable_http_call_version(http_server: str):
+    async with Client(transport=StreamableHttpTransport(http_server)) as client:
+        version_result = await client.call_tool("tool_version", {})
+
+        assert version_result.data is not None
+        assert "version" in version_result.data
+        assert version_result.data["version"] == "0.7.5"
