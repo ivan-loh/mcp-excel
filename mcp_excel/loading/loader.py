@@ -1,6 +1,6 @@
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 import pandas as pd
 import duckdb
 
