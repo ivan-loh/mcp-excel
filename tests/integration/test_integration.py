@@ -279,4 +279,4 @@ def test_version():
     result = server.version()
     assert "version" in result
     assert result["version"] == __version__
-    assert result["version"] == "0.7.5"
+    assert result["version"] == "0.7.6"

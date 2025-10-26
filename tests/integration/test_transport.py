@@ -101,4 +101,4 @@ async def test_streamable_http_call_version(http_server: str):
 
         assert version_result.data is not None
         assert "version" in version_result.data
-        assert version_result.data["version"] == "0.7.5"
+        assert version_result.data["version"] == "0.7.6"
